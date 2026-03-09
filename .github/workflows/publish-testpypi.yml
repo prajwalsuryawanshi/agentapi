@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: testpypi
-      url: https://test.pypi.org/project/agentapi/
+      url: https://test.pypi.org/project/agentapi-core/
     permissions:
       id-token: write
     steps:

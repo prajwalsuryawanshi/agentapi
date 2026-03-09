@@ -51,7 +51,7 @@ It is designed for teams that want FastAPI-style simplicity for LLM agents, with
 Install from PyPI:
 
 ```bash
-pip install agentapi
+pip install agentapi-core
 ```
 
 Install in editable mode while developing:
@@ -269,7 +269,7 @@ This repository is configured to publish on GitHub Release.
 
 Required one-time setup:
 
-- In PyPI, create project `agentapi` (or claim the name if available).
+- In PyPI, create project `agentapi-core`.
 - Configure trusted publisher for this GitHub repository.
 - Keep release workflow enabled in `.github/workflows/publish.yml`.
 
@@ -279,7 +279,7 @@ Use these exact values when adding publishers.
 
 TestPyPI pending publisher:
 
-- Project name: `agentapi`
+- Project name: `agentapi-core`
 - Owner: `prajwalsuryawanshi`
 - Repository: `agentapi`
 - Workflow filename: `publish-testpypi.yml`
@@ -287,13 +287,13 @@ TestPyPI pending publisher:
 
 PyPI trusted publisher (after project exists):
 
-- Project name: `agentapi`
+- Project name: `agentapi-core`
 - Owner: `prajwalsuryawanshi`
 - Repository: `agentapi`
 - Workflow filename: `publish.yml`
 - Environment name: `pypi`
 
-Note: package names on PyPI are normalized, so use lowercase `agentapi`.
+Note: package names on PyPI are normalized, so use lowercase `agentapi-core`.
 
 ## License
 
