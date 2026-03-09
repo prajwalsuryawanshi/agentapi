@@ -273,6 +273,28 @@ Required one-time setup:
 - Configure trusted publisher for this GitHub repository.
 - Keep release workflow enabled in `.github/workflows/publish.yml`.
 
+### Trusted Publisher Values
+
+Use these exact values when adding publishers.
+
+TestPyPI pending publisher:
+
+- Project name: `agentapi`
+- Owner: `prajwalsuryawanshi`
+- Repository: `agentapi`
+- Workflow filename: `publish-testpypi.yml`
+- Environment name: `testpypi`
+
+PyPI trusted publisher (after project exists):
+
+- Project name: `agentapi`
+- Owner: `prajwalsuryawanshi`
+- Repository: `agentapi`
+- Workflow filename: `publish.yml`
+- Environment name: `pypi`
+
+Note: package names on PyPI are normalized, so use lowercase `agentapi`.
+
 ## License
 
 MIT License. See `LICENSE`.
