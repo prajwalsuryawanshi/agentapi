@@ -1,0 +1,29 @@
+name: Bug report
+description: Report a reproducible problem
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug and expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Include minimal code or commands.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: AgentAPI version
+      placeholder: e.g. 0.1.0
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: e.g. 3.11
