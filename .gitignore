@@ -32,3 +32,6 @@ htmlcov/
 Thumbs.db
 .vscode/
 .idea/
+
+# Local Copilot notes
+.copilot/
