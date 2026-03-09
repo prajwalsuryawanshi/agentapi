@@ -5,10 +5,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](#installation)
 [![Status](https://img.shields.io/badge/status-MVP-success.svg)](#project-status)
+[![Docs](https://img.shields.io/badge/docs-site-blue)](https://agentapi.prajwalsuryawanshi.in)
 
 AgentAPI is an open-source Python framework for building agentic AI backends with a clean developer experience: minimal setup, provider abstraction, tool calling, memory, and streaming-first APIs.
 
 It is designed for teams that want FastAPI-style simplicity for LLM agents, without heavy orchestration overhead.
+
+Documentation site: `https://agentapi.prajwalsuryawanshi.in`
 
 ## Table of Contents
 

@@ -1,0 +1,39 @@
+site_name: AgentAPI
+site_description: AgentAPI documentation
+site_url: https://agentapi.prajwalsuryawanshi.in
+repo_url: https://github.com/prajwalsuryawanshi/agentapi
+repo_name: prajwalsuryawanshi/agentapi
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Getting Started: getting-started.md
+  - Providers: providers.md
+  - Tool Calling: tools.md
+  - Streaming: streaming.md
+  - CLI: cli.md
+  - API Reference: api-reference.md
+  - Deployment: deployment.md
+  - FAQ: faq.md
+
+theme:
+  name: material
+  logo: assets/agentapi-logo.png
+  favicon: assets/agentapi-favicon.png
+  features:
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.highlight
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/prajwalsuryawanshi/agentapi

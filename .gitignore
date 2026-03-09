@@ -13,6 +13,7 @@ build/
 dist/
 *.egg-info/
 *.egg
+site/
 
 # Test and tooling caches
 .pytest_cache/
