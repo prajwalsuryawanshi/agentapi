@@ -1,0 +1,32 @@
+:root {
+  --md-primary-fg-color: #2e7d32;
+  --md-accent-fg-color: #2e7d32;
+}
+
+/* Keep the UI light and readable */
+.md-header {
+  background-color: #ffffff;
+  color: #1b5e20;
+  border-bottom: 1px solid #e8f5e9;
+}
+
+.md-header__title,
+.md-header__topic,
+.md-header__button {
+  color: #1b5e20;
+}
+
+/* Make project logo larger in top navigation */
+.md-header__button.md-logo img,
+.md-nav__button.md-logo img {
+  height: 2.4rem;
+  width: auto;
+}
+
+.md-typeset a {
+  color: #2e7d32;
+}
+
+.md-typeset a:hover {
+  color: #1b5e20;
+}

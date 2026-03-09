@@ -20,11 +20,18 @@ theme:
   name: material
   logo: assets/agentapi-logo.png
   favicon: assets/agentapi-favicon.png
+  palette:
+    - scheme: default
+      primary: green
+      accent: green
   features:
     - navigation.sections
     - navigation.top
     - search.suggest
     - content.code.copy
+
+extra_css:
+  - stylesheets/extra.css
 
 markdown_extensions:
   - admonition
