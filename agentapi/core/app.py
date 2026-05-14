@@ -138,23 +138,23 @@ class AgentAPI(FastAPI):
         html = bytes(base.body).decode("utf-8")
         inject = f"""
 <style>
-    body {
+    body {{
         background: #0b1220;
-    }
+    }}
 
-    .swagger-ui {
+    .swagger-ui {{
         color: #e5eefc;
         background: #0b1220;
-    }
+    }}
 
-    .swagger-ui .topbar {
+    .swagger-ui .topbar {{
         background-color: #111827;
         border-bottom: 1px solid rgba(148, 163, 184, 0.18);
-    }
+    }}
 
-    .swagger-ui .topbar .download-url-wrapper {
+    .swagger-ui .topbar .download-url-wrapper {{
         display: none;
-    }
+    }}
 
     .swagger-ui .scheme-container,
     .swagger-ui .opblock,
@@ -164,10 +164,10 @@ class AgentAPI(FastAPI):
     .swagger-ui .responses-wrapper,
     .swagger-ui .opblock .opblock-summary,
     .swagger-ui .opblock .opblock-section-header,
-    .swagger-ui .opblock .opblock-body {
+    .swagger-ui .opblock .opblock-body {{
         background: #111827 !important;
         border-color: rgba(148, 163, 184, 0.18) !important;
-    }
+    }}
 
     .swagger-ui .opblock .opblock-summary-description,
     .swagger-ui .opblock .opblock-summary-path,
@@ -187,29 +187,29 @@ class AgentAPI(FastAPI):
     .swagger-ui .tab li a,
     .swagger-ui .servers-title,
     .swagger-ui .servers, 
-    .swagger-ui .servers label {
+    .swagger-ui .servers label {{
         color: #e5eefc !important;
-    }
+    }}
 
     .swagger-ui input,
     .swagger-ui select,
-    .swagger-ui textarea {
+    .swagger-ui textarea {{
         background: #0f172a !important;
         color: #e5eefc !important;
         border-color: rgba(148, 163, 184, 0.25) !important;
-    }
+    }}
 
-    .swagger-ui .topbar-wrapper .link img {
+    .swagger-ui .topbar-wrapper .link img {{
         height: 28px;
         width: auto;
-    }
+    }}
 
     .swagger-ui .btn.execute,
-    .swagger-ui .btn.authorize {
+    .swagger-ui .btn.authorize {{
         background: linear-gradient(135deg, #0ea5e9, #2563eb) !important;
         color: white !important;
         border: none !important;
-    }
+    }}
 </style>
 <script>
 window.addEventListener('load', function () {{
