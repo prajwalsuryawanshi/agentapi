@@ -116,24 +116,59 @@ class Agent:
         self.memory.add({"role": "assistant", "content": fallback})
         return fallback
 
-    async def stream(self, message: str) -> AsyncIterator[str]:
-        """Stream model tokens and persist final assistant message."""
+    async def stream(self, message: str, *, max_tool_rounds: int = 3) -> AsyncIterator[str]:
+        """
+        Stream model tokens and persist final assistant message.
+        Executes tool-calling loop before
+        streaming the final assistant response.
+        """
 
-        conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
+        self.memory.add({"role": "user", "content": message})
         provider = self._get_provider()
 
-        collected: list[str] = []
-        async for token in provider.stream(
-            conversation_messages,
-            tools=self._tool_schemas(),
-            tool_calling=self.tool_calling,
-        ):
-            collected.append(token)
-            yield token
+        for _ in range(max_tool_rounds + 1):
+            response = await provider.chat(
+                self.memory.messages,
+                tools=self._tool_schemas(),
+                tool_calling=self.tool_calling,
+            )
 
-        full_text = "".join(collected)
-        self.memory.add({"role": "user", "content": message})
-        self.memory.add({"role": "assistant", "content": full_text})
+            if response.tool_calls:
+                self.memory.add(
+                    {
+                        "role": "assistant",
+                        "content": response.content or "",
+                        "tool_calls": [
+                            {
+                                "id": call.id,
+                                "type": "function",
+                                "function": {
+                                    "name": call.name,
+                                    "arguments": call.arguments,
+                                },
+                            }
+                            for call in response.tool_calls
+                        ],
+                    }
+                )
+                await self._execute_tool_calls(response.tool_calls)
+                continue
+
+            collected: list[str] = []
+            async for token in provider.stream(
+                self.memory.messages,
+                tools=None,
+                tool_calling=self.tool_calling,
+            ):
+                collected.append(token)
+                yield token
+
+            self.memory.add({"role": "assistant", "content": "".join(collected)})
+            return
+
+        fallback = "Tool loop reached max rounds without final response"
+        self.memory.add({"role": "assistant", "content": fallback})
+        yield fallback
 
     def _create_provider(self, settings: Any) -> BaseProvider:
         custom_factory = self._custom_provider_factories.get(self.provider_name)
