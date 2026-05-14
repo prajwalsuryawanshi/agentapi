@@ -7,7 +7,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-
+import shutil
 
 MAIN_TEMPLATE = '''from agentapi import AgentAPI, Agent\n\napp = AgentAPI()\n\nagent = Agent(\n    system_prompt="You are a helpful assistant",\n    provider="{provider}",\n)\n\n\n@app.chat("/chat")\nasync def chat(message: str):\n    return await agent.run(message)\n\n\n@app.chat("/stream")\nasync def stream_chat(message: str):\n    return agent.stream(message)\n'''
 
@@ -15,7 +15,7 @@ TOOLS_TEMPLATE = '''from agentapi import tool\n\n\n@tool\ndef get_weather(city: 
 
 AGENTS_TEMPLATE = '''from agentapi import Agent\nfrom tools import get_weather\n\nassistant = Agent(\n    system_prompt="You are a helpful assistant",\n    provider="{provider}",\n    tools=[get_weather],\n)\n'''
 
-ENV_TEMPLATE = '''OPENAI_API_KEY=\nGEMINI_API_KEY=\nOPENROUTER_API_KEY=\nDEFAULT_PROVIDER={provider}\n'''
+
 
 
 def _write_file(path: Path, content: str) -> None:
@@ -90,7 +90,19 @@ def cmd_new(args: argparse.Namespace) -> int:
     _write_file(project_path / "main.py", MAIN_TEMPLATE.format(provider=provider))
     _write_file(project_path / "tools.py", TOOLS_TEMPLATE)
     _write_file(project_path / "agents.py", AGENTS_TEMPLATE.format(provider=provider))
-    _write_file(project_path / ".env", ENV_TEMPLATE.format(provider=provider))
+
+    env_example_path = Path(__file__).resolve().parent.parent / ".env.example"
+    env_path = project_path / ".env"
+
+    shutil.copy(env_example_path, env_path)
+
+    env_content = env_path.read_text(encoding="utf-8")
+    env_content = env_content.replace(
+        "DEFAULT_PROVIDER=openai",
+        f"DEFAULT_PROVIDER={provider}",
+    )
+
+    env_path.write_text(env_content, encoding="utf-8")
 
     print(f"Created AgentAPI project at: {project_path}")
     print("Next steps:")
