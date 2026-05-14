@@ -101,7 +101,13 @@ Open docs:
 
 ## Provider Configuration
 
-Create `.env`:
+Create a local environment file from the example template:
+
+```bash
+cp .env.example .env
+```
+
+Then update the environment variables as needed:
 
 ```env
 OPENAI_API_KEY=
