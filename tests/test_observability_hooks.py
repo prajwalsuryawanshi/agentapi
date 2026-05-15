@@ -104,6 +104,25 @@ def test_async_event_hooks_are_supported() -> None:
     assert [event["event"] for event in events] == ["provider.chat.start", "provider.chat.end"]
 
 
+def test_failing_event_hook_does_not_break_agent_execution() -> None:
+    events: list[dict[str, Any]] = []
+    failures: list[str] = []
+
+    def fail(event: dict[str, Any]) -> None:
+        failures.append(event["event"])
+        raise RuntimeError("hook unavailable")
+
+    agent = Agent(
+        system_prompt="You are helpful",
+        provider=FakeProvider([ProviderResponse(content="ok", tool_calls=[], raw_message={})]),
+        event_hooks=[fail, events.append],
+    )
+
+    assert asyncio.run(agent.run("hello")) == "ok"
+    assert failures == ["provider.chat.start", "provider.chat.end"]
+    assert [event["event"] for event in events] == ["provider.chat.start", "provider.chat.end"]
+
+
 def test_provider_errors_emit_structured_error_event() -> None:
     events: list[dict[str, Any]] = []
     agent = Agent(
