@@ -243,7 +243,7 @@ class Agent:
             "model": self.model,
             "message_count": len(messages),
             "tools_count": len(self._tools),
-            "tool_names": sorted(self._tools),
+            "tool_names": tuple(sorted(self._tools)),
         }
 
     async def _chat_with_events(self, provider: BaseProvider, messages: list[dict[str, Any]]):

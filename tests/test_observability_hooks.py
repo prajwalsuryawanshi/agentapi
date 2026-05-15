@@ -84,12 +84,28 @@ def test_run_emits_provider_and_tool_events_without_payloads() -> None:
     assert events[0]["provider"] == "fakeprovider"
     assert isinstance(events[0]["model"], str)
     assert events[0]["model"]
-    assert events[0]["tool_names"] == ["add"]
+    assert events[0]["tool_names"] == ("add",)
     assert events[1]["tool_call_count"] == 1
     assert events[3]["tool_name"] == "add"
     assert events[3]["output_length"] == 1
     assert all("content" not in event for event in events)
     assert all("arguments" not in event for event in events)
+
+
+def test_provider_tool_names_are_immutable_for_hooks() -> None:
+    def mutate_tool_names(event: dict[str, Any]) -> None:
+        event["tool_names"] += ("mutated",)
+
+    events: list[dict[str, Any]] = []
+    agent = Agent(
+        system_prompt="You are helpful",
+        provider=FakeProvider([ProviderResponse(content="ok", tool_calls=[], raw_message={})]),
+        tools=[add],
+        event_hooks=[mutate_tool_names, events.append],
+    )
+
+    assert asyncio.run(agent.run("hello")) == "ok"
+    assert events[0]["tool_names"] == ("add",)
 
 
 def test_async_event_hooks_are_supported() -> None:
