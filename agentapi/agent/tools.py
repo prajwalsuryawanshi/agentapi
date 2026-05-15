@@ -225,7 +225,7 @@ def to_tool_definition(func: Callable[..., Any]) -> ToolDefinition:
 
     return ToolDefinition(
         name=getattr(func, "__agentapi_tool_name__", func.__name__),
-        description=inspect.getdoc(func) or "",
+        description=description,
         context=context,
         func=func,
         schema=schema,
