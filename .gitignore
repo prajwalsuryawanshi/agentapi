@@ -1,5 +1,36 @@
-venv  
-venv312  
-get-pip.py  
-python312.exe  
-test_manual.py  
+# Virtual environments
+venv/
+venv312/
+env/
+.venv/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Test/coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment files
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Temp files
+get-pip.py
+python312.exe
+test_manual.py

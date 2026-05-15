@@ -109,9 +109,10 @@ def parse_docstring_params(func: Callable[..., Any]) -> dict[str, str]:
         if google_match:
             params: dict[str, str] = {}
             block = google_match.group(1)
-            # Each param line: "    name (type): description" or "    name: description"
+            # Each param may span multiple continuation lines.
+            # A new param starts at indent >= 2 followed by a word and colon.
             for match in re.finditer(
-                r"^\s{2,}(\w+)(?:\s*\([^)]*\))?\s*:\s*(.+?)(?=\n\s{2,}\w|\Z)",
+                r"^\s{2,}(\w+)(?:\s*\([^)]*\))?\s*:\s*(.+?)(?=\n\s{2,}\w+(?:\s*\([^)]*\))?\s*:|\Z)",
                 block,
                 re.MULTILINE | re.DOTALL,
             ):
