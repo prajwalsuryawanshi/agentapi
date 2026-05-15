@@ -88,7 +88,7 @@ def _build_openai_tool_schema(
     properties: dict[str, Any] = {}
     required: list[str] = []
 
-    for name, param in signature.parameters.items():
+    for param_name, param in signature.parameters.items():
         annotation = param.annotation
         if annotation is inspect._empty:
             annotation = str
@@ -97,13 +97,13 @@ def _build_openai_tool_schema(
         if param.default is not inspect._empty and not isinstance(param_type, list):
             param_type = [param_type, "null"]
 
-        properties[name] = {
+        properties[param_name] = {
             "type": param_type,
-            "description": f"Parameter: {name}",
+            "description": f"Parameter: {param_name}",
         }
 
         # Strict mode expects required to include all declared properties.
-        required.append(name)
+        required.append(param_name)
 
     return {
         "type": "function",
