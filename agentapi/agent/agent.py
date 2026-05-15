@@ -14,7 +14,7 @@ from agentapi.providers.gemini import GeminiProvider
 from agentapi.providers.openai import OpenAIProvider
 from agentapi.providers.openrouter import OpenRouterProvider
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
@@ -54,6 +54,8 @@ class Agent:
         self._provider: BaseProvider | None = provider if isinstance(provider, BaseProvider) else None
         self._tools: dict[str, ToolDefinition] = {}
         self._vectorstore = None
+        self._embeddings = None
+        self._embedding_model_name = None
 
         for func in tools or []:
             self.add_tool(func)
@@ -80,17 +82,39 @@ class Agent:
             chunk_overlap: Overlap between consecutive chunks.
             embedding_model: HuggingFace sentence-transformer model name.
         """
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-        )
-        chunks = splitter.create_documents(texts)
-        embeddings = HuggingFaceEmbeddings(model_name=embedding_model)
+        if not texts:
+            raise ValueError("texts must be a non-empty list of strings.")
 
-        if self._vectorstore is not None:
-            self._vectorstore.add_documents(chunks)
-        else:
-            self._vectorstore = FAISS.from_documents(chunks, embeddings)
+        if self._embedding_model_name is not None and embedding_model != self._embedding_model_name:
+            raise ValueError(
+                f"Cannot mix embedding models: knowledge base uses "
+                f"'{self._embedding_model_name}', but '{embedding_model}' was requested. "
+                f"Create a new Agent instance to use a different model."
+            )
+
+        try:
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+            )
+            chunks = splitter.create_documents(texts)
+
+            if not chunks:
+                raise ValueError("Text chunking produced no documents. Check chunk_size and input texts.")
+
+            if self._embeddings is None:
+                self._embeddings = HuggingFaceEmbeddings(model_name=embedding_model)
+                self._embedding_model_name = embedding_model
+
+            if self._vectorstore is not None:
+                self._vectorstore.add_documents(chunks)
+            else:
+                self._vectorstore = FAISS.from_documents(chunks, self._embeddings)
+
+        except ValueError:
+            raise
+        except Exception as e:
+            raise RuntimeError(f"Failed to add knowledge to vector store: {e}") from e
 
     def query_knowledge(self, query: str, *, k: int = 3) -> list[str]:
         """Retrieve top-k relevant chunks from the knowledge base.
@@ -104,8 +128,15 @@ class Agent:
         """
         if self._vectorstore is None:
             return []
-        docs = self._vectorstore.similarity_search(query, k=k)
-        return [doc.page_content for doc in docs]
+
+        if not query or not query.strip():
+            raise ValueError("query must be a non-empty string.")
+
+        try:
+            docs = self._vectorstore.similarity_search(query, k=k)
+            return [doc.page_content for doc in docs]
+        except Exception as e:
+            raise RuntimeError(f"Failed to query knowledge base: {e}") from e
 
     def reset_memory(self) -> None:
         """Clear conversation state but preserve the agent system prompt."""
