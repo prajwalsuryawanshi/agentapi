@@ -13,6 +13,9 @@ from agentapi.providers.base import BaseProvider, ToolCall
 from agentapi.providers.gemini import GeminiProvider
 from agentapi.providers.openai import OpenAIProvider
 from agentapi.providers.openrouter import OpenRouterProvider
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
 ProviderFactory = Callable[["Agent", Any, str], BaseProvider]
@@ -50,6 +53,7 @@ class Agent:
         self._settings = settings
         self._provider: BaseProvider | None = provider if isinstance(provider, BaseProvider) else None
         self._tools: dict[str, ToolDefinition] = {}
+        self._vectorstore = None
 
         for func in tools or []:
             self.add_tool(func)
@@ -59,6 +63,49 @@ class Agent:
 
         definition = to_tool_definition(func)
         self._tools[definition.name] = definition
+
+    def add_knowledge(
+        self,
+        texts: list[str],
+        *,
+        chunk_size: int = 500,
+        chunk_overlap: int = 50,
+        embedding_model: str = "all-MiniLM-L6-v2",
+    ) -> None:
+        """Index plain-text knowledge into a FAISS vector store for RAG.
+
+        Args:
+            texts: List of raw text strings to embed and store.
+            chunk_size: Size of each text chunk.
+            chunk_overlap: Overlap between consecutive chunks.
+            embedding_model: HuggingFace sentence-transformer model name.
+        """
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+        chunks = splitter.create_documents(texts)
+        embeddings = HuggingFaceEmbeddings(model_name=embedding_model)
+
+        if self._vectorstore is not None:
+            self._vectorstore.add_documents(chunks)
+        else:
+            self._vectorstore = FAISS.from_documents(chunks, embeddings)
+
+    def query_knowledge(self, query: str, *, k: int = 3) -> list[str]:
+        """Retrieve top-k relevant chunks from the knowledge base.
+
+        Args:
+            query: The search query string.
+            k: Number of top results to return.
+
+        Returns:
+            List of matching text chunks.
+        """
+        if self._vectorstore is None:
+            return []
+        docs = self._vectorstore.similarity_search(query, k=k)
+        return [doc.page_content for doc in docs]
 
     def reset_memory(self) -> None:
         """Clear conversation state but preserve the agent system prompt."""
