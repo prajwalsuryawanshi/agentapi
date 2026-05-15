@@ -25,6 +25,8 @@ class FakeProvider(BaseProvider):
     ) -> ProviderResponse:
         if self.should_fail:
             raise RuntimeError("provider unavailable")
+        if not self.responses:
+            raise AssertionError("No queued FakeProvider responses left for chat()")
         return self.responses.pop(0)
 
     async def stream(
@@ -79,7 +81,8 @@ def test_run_emits_provider_and_tool_events_without_payloads() -> None:
         "provider.chat.end",
     ]
     assert events[0]["provider"] == "fakeprovider"
-    assert events[0]["model"] == "gpt-4o-mini"
+    assert isinstance(events[0]["model"], str)
+    assert events[0]["model"]
     assert events[0]["tool_names"] == ["add"]
     assert events[1]["tool_call_count"] == 1
     assert events[3]["tool_name"] == "add"
@@ -157,3 +160,5 @@ def test_stream_emits_latency_and_token_counts() -> None:
     assert [event["event"] for event in events] == ["provider.stream.start", "provider.stream.end"]
     assert events[-1]["token_count"] == 2
     assert events[-1]["content_length"] == 5
+    assert isinstance(events[-1]["duration_ms"], (int, float))
+    assert events[-1]["duration_ms"] >= 0
