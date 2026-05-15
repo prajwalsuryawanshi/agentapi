@@ -132,6 +132,9 @@ class Agent:
         if not query or not query.strip():
             raise ValueError("query must be a non-empty string.")
 
+        if k <= 0:
+            raise ValueError("k must be a positive integer.")
+
         try:
             docs = self._vectorstore.similarity_search(query, k=k)
             return [doc.page_content for doc in docs]
