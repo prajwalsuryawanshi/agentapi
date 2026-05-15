@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 import types
 from dataclasses import dataclass
 from typing import Any, get_args, get_origin
@@ -62,6 +63,90 @@ def _json_type(annotation: Any) -> str | list[str]:
     return "string"
 
 
+def parse_docstring_params(func: Callable[..., Any]) -> dict[str, str]:
+    """Parse parameter descriptions from a function's docstring.
+
+    Supports Google style and NumPy style docstrings.
+    Falls back to an empty dict if parsing fails or no docstring is present.
+
+    Args:
+        func: The callable whose docstring will be parsed.
+
+    Returns:
+        A dict mapping parameter names to their descriptions.
+
+    Examples:
+        Google style::
+
+            def fn(city: str, units: str):
+                \"\"\"Get weather.
+
+                Args:
+                    city (str): The city name to look up.
+                    units (str): Temperature units, e.g. 'metric'.
+                \"\"\"
+
+        NumPy style::
+
+            def fn(city: str, units: str):
+                \"\"\"Get weather.
+
+                Parameters
+                ----------
+                city : str
+                    The city name to look up.
+                units : str
+                    Temperature units, e.g. 'metric'.
+                \"\"\"
+    """
+    try:
+        docstring = inspect.getdoc(func)
+        if not docstring:
+            return {}
+
+        # Try Google style: Args:\n    param (type): description
+        google_match = re.search(r"Args:\s*\n(.*?)(?:\n\s*\n|\Z)", docstring, re.DOTALL)
+        if google_match:
+            params: dict[str, str] = {}
+            block = google_match.group(1)
+            # Each param line: "    name (type): description" or "    name: description"
+            for match in re.finditer(
+                r"^\s{2,}(\w+)(?:\s*\([^)]*\))?\s*:\s*(.+?)(?=\n\s{2,}\w|\Z)",
+                block,
+                re.MULTILINE | re.DOTALL,
+            ):
+                param_name = match.group(1).strip()
+                param_desc = " ".join(match.group(2).split())
+                params[param_name] = param_desc
+            if params:
+                return params
+
+        # Try NumPy style: Parameters\n----------\nparam : type\n    description
+        numpy_match = re.search(
+            r"Parameters\s*\n[-]+\s*\n(.*?)(?:\n\s*\n[A-Za-z]|\Z)", docstring, re.DOTALL
+        )
+        if numpy_match:
+            params = {}
+            block = numpy_match.group(1)
+            # Split on param entries: "name : type\n    description"
+            for match in re.finditer(
+                r"^(\w+)\s*(?::\s*[^\n]*)?\n((?:\s+.+\n?)+)",
+                block,
+                re.MULTILINE,
+            ):
+                param_name = match.group(1).strip()
+                param_desc = " ".join(match.group(2).split())
+                params[param_name] = param_desc
+            if params:
+                return params
+
+        return {}
+
+    except Exception:
+        # Always fall back gracefully — never break tool registration
+        return {}
+
+
 def _compose_tool_description(
     func: Callable[..., Any],
     *,
@@ -88,7 +173,10 @@ def _build_openai_tool_schema(
     properties: dict[str, Any] = {}
     required: list[str] = []
 
-    for name, param in signature.parameters.items():
+    # Parse docstring param descriptions once for all parameters
+    docstring_params = parse_docstring_params(func)
+
+    for param_name, param in signature.parameters.items():
         annotation = param.annotation
         if annotation is inspect._empty:
             annotation = str
@@ -97,13 +185,16 @@ def _build_openai_tool_schema(
         if param.default is not inspect._empty and not isinstance(param_type, list):
             param_type = [param_type, "null"]
 
-        properties[name] = {
+        # Use parsed docstring description if available, else fall back to generic
+        param_description = docstring_params.get(param_name) or f"Parameter: {param_name}"
+
+        properties[param_name] = {
             "type": param_type,
-            "description": f"Parameter: {name}",
+            "description": param_description,
         }
 
         # Strict mode expects required to include all declared properties.
-        required.append(name)
+        required.append(param_name)
 
     return {
         "type": "function",
@@ -169,7 +260,8 @@ def to_tool_definition(func: Callable[..., Any]) -> ToolDefinition:
 
     return ToolDefinition(
         name=func.__name__,
-        description=inspect.getdoc(func) or "",
+        description=description,
+        context=context,
         func=func,
         schema=schema,
     )

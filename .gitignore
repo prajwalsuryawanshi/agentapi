@@ -1,38 +1,5 @@
-# Python cache and build artifacts
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Virtual environments
-.venv/
-venv/
-env/
-
-# Packaging outputs
-build/
-dist/
-*.egg-info/
-*.egg
-site/
-
-# Test and tooling caches
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-coverage.xml
-htmlcov/
-
-# Environment files
-.env
-.env.*
-!.env.example
-
-# Editors and OS files
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
-
-# Local Copilot notes
-.copilot/
+venv  
+venv312  
+get-pip.py  
+python312.exe  
+test_manual.py  
