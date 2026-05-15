@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, get_args, get_origin
 from collections.abc import Callable
 
+
 @dataclass
 class ToolDefinition:
     """Internal representation of a callable tool."""
@@ -41,7 +42,6 @@ def _json_type(annotation: Any) -> str | list[str]:
     if origin is dict:
         return "object"
 
-    # Handle Optional[T] / Union[T, None] as nullable schema types.
     if origin in (types.UnionType, getattr(types, "UnionType", object)) or str(origin) == "typing.Union":
         args = get_args(annotation)
         non_none = [arg for arg in args if arg is not type(None)]
@@ -55,7 +55,6 @@ def _json_type(annotation: Any) -> str | list[str]:
     if origin is type(None) and not args:
         return "string"
 
-    # Handle Optional[T] or Union[T, None].
     non_none = [arg for arg in args if arg is not type(None)]
     if non_none:
         return _json_type(non_none[0])
@@ -74,30 +73,6 @@ def parse_docstring_params(func: Callable[..., Any]) -> dict[str, str]:
 
     Returns:
         A dict mapping parameter names to their descriptions.
-
-    Examples:
-        Google style::
-
-            def fn(city: str, units: str):
-                \"\"\"Get weather.
-
-                Args:
-                    city (str): The city name to look up.
-                    units (str): Temperature units, e.g. 'metric'.
-                \"\"\"
-
-        NumPy style::
-
-            def fn(city: str, units: str):
-                \"\"\"Get weather.
-
-                Parameters
-                ----------
-                city : str
-                    The city name to look up.
-                units : str
-                    Temperature units, e.g. 'metric'.
-                \"\"\"
     """
     try:
         docstring = inspect.getdoc(func)
@@ -109,8 +84,6 @@ def parse_docstring_params(func: Callable[..., Any]) -> dict[str, str]:
         if google_match:
             params: dict[str, str] = {}
             block = google_match.group(1)
-            # Each param may span multiple continuation lines.
-            # A new param starts at indent >= 2 followed by a word and colon.
             for match in re.finditer(
                 r"^\s{2,}(\w+)(?:\s*\([^)]*\))?\s*:\s*(.+?)(?=\n\s{2,}\w+(?:\s*\([^)]*\))?\s*:|\Z)",
                 block,
@@ -129,7 +102,6 @@ def parse_docstring_params(func: Callable[..., Any]) -> dict[str, str]:
         if numpy_match:
             params = {}
             block = numpy_match.group(1)
-            # Split on param entries: "name : type\n    description"
             for match in re.finditer(
                 r"^(\w+)\s*(?::\s*[^\n]*)?\n((?:\s+.+\n?)+)",
                 block,
@@ -144,7 +116,6 @@ def parse_docstring_params(func: Callable[..., Any]) -> dict[str, str]:
         return {}
 
     except Exception:
-        # Always fall back gracefully — never break tool registration
         return {}
 
 
@@ -174,7 +145,6 @@ def _build_openai_tool_schema(
     properties: dict[str, Any] = {}
     required: list[str] = []
 
-    # Parse docstring param descriptions once for all parameters
     docstring_params = parse_docstring_params(func)
 
     for param_name, param in signature.parameters.items():
@@ -186,7 +156,6 @@ def _build_openai_tool_schema(
         if param.default is not inspect._empty and not isinstance(param_type, list):
             param_type = [param_type, "null"]
 
-        # Use parsed docstring description if available, else fall back to generic
         param_description = docstring_params.get(param_name) or f"Parameter: {param_name}"
 
         properties[param_name] = {
@@ -194,7 +163,6 @@ def _build_openai_tool_schema(
             "description": param_description,
         }
 
-        # Strict mode expects required to include all declared properties.
         required.append(param_name)
 
     return {
@@ -220,11 +188,7 @@ def tool(
     description: str | None = None,
     context: str | None = None,
 ) -> Callable[..., Any]:
-    """Decorator that tags a Python function as an AgentAPI tool.
-
-    The decorator supports explicit metadata so the caller can provide LLM-facing
-    context at tool creation time without relying on docstrings alone.
-    """
+    """Decorator that tags a Python function as an AgentAPI tool."""
 
     def decorator(target: Callable[..., Any]) -> Callable[..., Any]:
         tool_name = (name or target.__name__).strip()
@@ -260,8 +224,8 @@ def to_tool_definition(func: Callable[..., Any]) -> ToolDefinition:
     context = getattr(func, "__agentapi_tool_context__", None) or ""
 
     return ToolDefinition(
-        name=func.__name__,
-        description=description,
+        name=getattr(func, "__agentapi_tool_name__", func.__name__),
+        description=inspect.getdoc(func) or "",
         context=context,
         func=func,
         schema=schema,
