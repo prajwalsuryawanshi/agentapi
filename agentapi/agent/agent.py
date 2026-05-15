@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from typing import Any, AsyncIterator, Callable
+
+from fastapi.responses import StreamingResponse
 
 from agentapi.agent.memory import InMemoryMemory, MemoryBackend
 from agentapi.agent.tools import ToolDefinition, parse_tool_args, to_tool_definition
@@ -14,8 +17,60 @@ from agentapi.providers.gemini import GeminiProvider
 from agentapi.providers.openai import OpenAIProvider
 from agentapi.providers.openrouter import OpenRouterProvider
 
+logger = logging.getLogger(__name__)
 
 ProviderFactory = Callable[["Agent", Any, str], BaseProvider]
+
+
+class AgentStream:
+    """Wrapper returned by agent.stream().
+
+    Supports both iteration patterns:
+
+    Correct usage::
+
+        # Pattern 1 — async for (recommended)
+        async for chunk in agent.stream(message):
+            print(chunk)
+
+        # Pattern 2 — FastAPI StreamingResponse
+        return agent.stream(message).to_streaming_response()
+
+    Incorrect usage::
+
+        # This will raise AgentAPIUsageError with a helpful message
+        response = await agent.stream(message)
+    """
+
+    def __init__(self, generator: AsyncIterator[str]) -> None:
+        self._generator = generator
+
+    def __aiter__(self) -> AsyncIterator[str]:
+        return self._generator.__aiter__()
+
+    def __await__(self):
+        raise AgentAPIUsageError(
+            "agent.stream() cannot be awaited directly.\n"
+            "Use:  async for chunk in agent.stream(message): ...\n"
+            "Or:   agent.stream(message).to_streaming_response()"
+        )
+
+    def to_streaming_response(self, media_type: str = "text/event-stream") -> StreamingResponse:
+        """Wrap the stream in a FastAPI StreamingResponse for SSE endpoints."""
+        return StreamingResponse(self._generator, media_type=media_type)
+
+
+class AgentAPIUsageError(Exception):
+    """Raised when the developer uses the AgentAPI incorrectly."""
+    pass
+
+
+class AgentAPIProviderError(Exception):
+    """Raised when an upstream LLM provider call fails."""
+
+    def __init__(self, message: str, original: Exception | None = None) -> None:
+        super().__init__(message)
+        self.original = original
 
 
 class Agent:
@@ -78,58 +133,109 @@ class Agent:
         conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
         provider = self._get_provider()
 
-        for _ in range(max_tool_rounds + 1):
-            response = await provider.chat(
-                conversation_messages,
-                tools=self._tool_schemas(),
-                tool_calling=self.tool_calling,
-            )
-
-            if response.tool_calls:
-                conversation_messages.append(
-                    {
-                        "role": "assistant",
-                        "content": response.content or "",
-                        "tool_calls": [
-                            {
-                                "id": call.id,
-                                "type": "function",
-                                "function": {
-                                    "name": call.name,
-                                    "arguments": call.arguments,
-                                },
-                            }
-                            for call in response.tool_calls
-                        ],
-                    }
+        try:
+            for _ in range(max_tool_rounds + 1):
+                response = await provider.chat(
+                    conversation_messages,
+                    tools=self._tool_schemas(),
+                    tool_calling=self.tool_calling,
                 )
 
-                await self._execute_tool_calls(response.tool_calls, conversation_messages)
-                continue
+                if response.tool_calls:
+                    conversation_messages.append(
+                        {
+                            "role": "assistant",
+                            "content": response.content or "",
+                            "tool_calls": [
+                                {
+                                    "id": call.id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": call.name,
+                                        "arguments": call.arguments,
+                                    },
+                                }
+                                for call in response.tool_calls
+                            ],
+                        }
+                    )
 
-            self.memory.add({"role": "user", "content": message})
-            self.memory.add({"role": "assistant", "content": response.content})
-            return response.content
+                    await self._execute_tool_calls(response.tool_calls, conversation_messages)
+                    continue
+
+                self.memory.add({"role": "user", "content": message})
+                self.memory.add({"role": "assistant", "content": response.content})
+                return response.content
+
+        except AgentAPIUsageError:
+            raise
+        except Exception as exc:
+            logger.error(
+                "[AgentAPI] Provider error in run(): %s. "
+                "Check your API key and provider configuration.",
+                exc,
+            )
+            raise AgentAPIProviderError(
+                f"Provider call failed: {exc}. "
+                "Check your API key and provider configuration.",
+                original=exc,
+            ) from exc
 
         fallback = "Tool loop reached max rounds without final response"
         self.memory.add({"role": "user", "content": message})
         self.memory.add({"role": "assistant", "content": fallback})
         return fallback
 
-    async def stream(self, message: str) -> AsyncIterator[str]:
-        """Stream model tokens and persist final assistant message."""
+    def stream(self, message: str) -> AgentStream:
+        """Stream model tokens and return an AgentStream object.
+
+        Returns an :class:`AgentStream` that supports both async iteration
+        and conversion to a FastAPI ``StreamingResponse``.
+
+        Examples::
+
+            # Async iteration
+            async for chunk in agent.stream(message):
+                print(chunk, end="", flush=True)
+
+            # FastAPI SSE endpoint
+            return agent.stream(message).to_streaming_response()
+
+        Warning:
+            Do **not** await this method directly::
+
+                # Wrong — raises AgentAPIUsageError
+                response = await agent.stream(message)
+        """
+        return AgentStream(self._stream_generator(message))
+
+    async def _stream_generator(self, message: str) -> AsyncIterator[str]:
+        """Internal async generator that streams tokens from the provider."""
 
         conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
         provider = self._get_provider()
 
         collected: list[str] = []
-        async for token in provider.stream(
-            conversation_messages,
-            tools=self._tool_schemas(),
-            tool_calling=self.tool_calling,
-        ):
-            collected.append(token)
-            yield token
+        try:
+            async for token in provider.stream(
+                conversation_messages,
+                tools=self._tool_schemas(),
+                tool_calling=self.tool_calling,
+            ):
+                collected.append(token)
+                yield token
+
+        except Exception as exc:
+            logger.error(
+                "[AgentAPI] Streaming error: %s. "
+                "If you used 'await agent.stream()', change it to "
+                "'async for chunk in agent.stream():'.",
+                exc,
+            )
+            raise AgentAPIProviderError(
+                f"Streaming failed: {exc}",
+                original=exc,
+            ) from exc
 
         full_text = "".join(collected)
         self.memory.add({"role": "user", "content": message})
@@ -194,10 +300,9 @@ class Agent:
     def _default_tool_calling_for(self, provider_name: str) -> dict[str, Any]:
         if provider_name == "gemini":
             return {
-                "mode": "AUTO",  # Gemini functionCallingConfig mode
+                "mode": "AUTO",
             }
 
-        # OpenAI-compatible defaults.
         return {
             "tool_choice": "auto",
             "parallel_tool_calls": True,
