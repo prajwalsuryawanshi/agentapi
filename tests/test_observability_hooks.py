@@ -8,6 +8,7 @@ from typing import Any, AsyncIterator
 import pytest
 
 from agentapi import Agent, BaseProvider, tool
+from agentapi.agent.observability import emit_event
 from agentapi.providers.base import ProviderResponse, ToolCall
 
 
@@ -124,6 +125,17 @@ def test_failing_event_hook_does_not_break_agent_execution() -> None:
     assert asyncio.run(agent.run("hello")) == "ok"
     assert failures == ["provider.chat.start", "provider.chat.end"]
     assert [event["event"] for event in events] == ["provider.chat.start", "provider.chat.end"]
+
+
+def test_failing_event_hook_handles_missing_event_name() -> None:
+    events: list[dict[str, Any]] = []
+
+    def fail(_event: dict[str, Any]) -> None:
+        raise RuntimeError("hook unavailable")
+
+    asyncio.run(emit_event([fail, events.append], {"metadata": "missing-name"}))
+
+    assert events == [{"metadata": "missing-name"}]
 
 
 def test_provider_errors_emit_structured_error_event() -> None:

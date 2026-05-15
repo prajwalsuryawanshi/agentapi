@@ -33,4 +33,8 @@ async def emit_event(hooks: list[AgentEventHook], event: AgentEvent) -> None:
             if inspect.isawaitable(result):
                 await result
         except Exception:
-            logger.warning("AgentAPI event hook failed for %s", event["event"], exc_info=True)
+            logger.warning(
+                "AgentAPI event hook failed for %s",
+                event.get("event", "<unknown_event>"),
+                exc_info=True,
+            )
