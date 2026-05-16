@@ -45,6 +45,7 @@
   --btn-secondary-bd: #2e7d32;
   --btn-secondary-fg: #81c784;
   --btn-secondary-hv: rgba(102,187,106,0.12);
+  --focus-ring:       rgba(102,187,106,0.12);
 }
 
 /* Light mode aliases (keeps selectors DRY) */
@@ -74,6 +75,7 @@
   --btn-secondary-bd: #a5d6a7;
   --btn-secondary-fg: #2e7d32;
   --btn-secondary-hv: #e8f5e9;
+  --focus-ring:       rgba(46,125,50,0.12);
 }
 
 /* ── Header ────────────────────────────────────────────── */
@@ -118,7 +120,7 @@
 }
 .md-search__form:focus-within {
   border-color: var(--md-primary-fg-color);
-  box-shadow:   0 0 0 3px rgba(46,125,50,0.12);
+  box-shadow:   0 0 0 3px var(--focus-ring);
 }
 
 /* ── Navigation sidebar ────────────────────────────────── */
