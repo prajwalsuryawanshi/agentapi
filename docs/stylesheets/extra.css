@@ -1,32 +1,336 @@
+/* ── Brand tokens ──────────────────────────────────────── */
 :root {
-  --md-primary-fg-color: #2e7d32;
-  --md-accent-fg-color: #2e7d32;
+  --md-primary-fg-color:        #2e7d32;
+  --md-primary-fg-color--light: #4caf50;
+  --md-primary-fg-color--dark:  #1b5e20;
+  --md-accent-fg-color:         #2e7d32;
+
+  --md-text-font: "DM Sans", sans-serif;
+  --md-code-font: "DM Mono", monospace;
+
+  /* Motion tokens */
+  --transition-fast:   0.12s ease;
+  --transition-medium: 0.18s ease;
 }
 
-/* Keep the UI light and readable */
+/* ── Dark mode ─────────────────────────────────────────── */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color:        #66bb6a;
+  --md-primary-fg-color--light: #81c784;
+  --md-primary-fg-color--dark:  #a5d6a7;
+  --md-accent-fg-color:         #81c784;
+
+  --green-border:     #1b5e20;
+  --green-surface:    rgba(102,187,106,0.08);
+  --green-surface-hv: rgba(102,187,106,0.14);
+  --green-active-bg:  rgba(102,187,106,0.12);
+  --green-rule:       rgba(102,187,106,0.15);
+  --green-scrollbar:  #2e7d32;
+  --green-inset:      #66bb6a;
+  --green-tag-text:   #81c784;
+  --code-bg:          rgba(102,187,106,0.07);
+  --code-border:      rgba(102,187,106,0.18);
+  --code-block-bg:    #0d1f0f;
+  --code-block-bdr:   rgba(102,187,106,0.15);
+  --header-bg:        #0f1f11;
+  --header-border:    #1b5e20;
+  --footer-bg:        #0f1f11;
+  --footer-border:    rgba(102,187,106,0.12);
+  --nav-title-color:  #4caf50;
+  --nav-link-color:   #b0bec5;
+  --nav-link-hv-bg:   rgba(102,187,106,0.08);
+  --toc-muted:        #607d8b;
+  --search-bg:        rgba(102,187,106,0.06);
+  --search-border:    #1b5e20;
+  --btn-secondary-bd: #2e7d32;
+  --btn-secondary-fg: #81c784;
+  --btn-secondary-hv: rgba(102,187,106,0.12);
+}
+
+/* Light mode aliases (keeps selectors DRY) */
+[data-md-color-scheme="default"] {
+  --green-border:     #e8f5e9;
+  --green-surface:    #f1f8f1;
+  --green-surface-hv: #e8f5e9;
+  --green-active-bg:  #e8f5e9;
+  --green-rule:       #e8f5e9;
+  --green-scrollbar:  #81c784;
+  --green-inset:      #2e7d32;
+  --green-tag-text:   #2e7d32;
+  --code-bg:          rgba(46,125,50,0.07);
+  --code-border:      rgba(46,125,50,0.18);
+  --code-block-bg:    #1b2d1e;
+  --code-block-bdr:   rgba(46,125,50,0.2);
+  --header-bg:        #ffffff;
+  --header-border:    #e8f5e9;
+  --footer-bg:        #ffffff;
+  --footer-border:    #e8f5e9;
+  --nav-title-color:  #81c784;
+  --nav-link-color:   #37474f;
+  --nav-link-hv-bg:   #f1f8f1;
+  --toc-muted:        #90a4ae;
+  --search-bg:        #f1f8f1;
+  --search-border:    #c8e6c9;
+  --btn-secondary-bd: #a5d6a7;
+  --btn-secondary-fg: #2e7d32;
+  --btn-secondary-hv: #e8f5e9;
+}
+
+/* ── Header ────────────────────────────────────────────── */
 .md-header {
-  background-color: #ffffff;
-  color: #1b5e20;
-  border-bottom: 1px solid #e8f5e9;
+  background-color: var(--header-bg);
+  border-bottom:    1.5px solid var(--header-border);
+  box-shadow:       none;
 }
 
 .md-header__title,
-.md-header__topic,
-.md-header__button {
-  color: #1b5e20;
+.md-header__topic {
+  color:          var(--md-primary-fg-color--dark);
+  font-weight:    500;
+  letter-spacing: -0.01em;
 }
 
-/* Make project logo larger in top navigation */
+.md-header__button {
+  color:      var(--md-primary-fg-color--dark);
+  transition: background var(--transition-fast);
+}
+.md-header__button:hover,
+.md-header__button:focus-visible {
+  background:    var(--green-surface-hv);
+  border-radius: 6px;
+}
+
+/* ── Logo ──────────────────────────────────────────────── */
 .md-header__button.md-logo img,
 .md-nav__button.md-logo img {
   height: 2.4rem;
-  width: auto;
+  width:  auto;
+}
+
+/* ── Search ────────────────────────────────────────────── */
+.md-search__form {
+  background:    var(--search-bg);
+  border:        1px solid var(--search-border);
+  border-radius: 8px;
+  box-shadow:    none;
+  transition:    border-color var(--transition-fast),
+                 box-shadow   var(--transition-fast);
+}
+.md-search__form:focus-within {
+  border-color: var(--md-primary-fg-color);
+  box-shadow:   0 0 0 3px rgba(46,125,50,0.12);
+}
+
+/* ── Navigation sidebar ────────────────────────────────── */
+.md-nav__title {
+  color:          var(--nav-title-color);
+  font-size:      0.65rem;
+  font-weight:    500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.md-nav__link {
+  color:         var(--nav-link-color);
+  border-radius: 5px;
+  padding:       0.3rem 0.5rem;
+  transition:    background var(--transition-fast),
+                 color      var(--transition-fast);
+}
+.md-nav__link:hover,
+.md-nav__link:focus-visible {
+  background: var(--nav-link-hv-bg);
+  color:      var(--md-primary-fg-color);
+}
+
+.md-nav__link--active,
+.md-nav__link--active:hover {
+  background:  var(--green-active-bg);
+  color:       var(--md-primary-fg-color);
+  font-weight: 500;
+  box-shadow:  inset 2.5px 0 0 var(--green-inset);
+}
+
+/* ── Table of contents ─────────────────────────────────── */
+.md-nav__link--passed,
+.md-nav--secondary .md-nav__link {
+  color: var(--toc-muted);
+}
+.md-nav--secondary .md-nav__link--active {
+  color:      var(--md-primary-fg-color);
+  box-shadow: inset 2px 0 0 var(--green-inset);
+}
+
+/* ── Content typography ────────────────────────────────── */
+.md-typeset h1 {
+  color:          var(--md-primary-fg-color--dark);
+  font-weight:    500;
+  letter-spacing: -0.02em;
+  font-size:      clamp(1.8rem, 4vw, 2.6rem);
+  line-height:    1.2;
+}
+
+.md-typeset h2 {
+  color:          var(--md-primary-fg-color);
+  font-weight:    500;
+  font-size:      clamp(1.25rem, 2.5vw, 1.6rem);
+  border-bottom:  1px solid var(--green-rule);
+  padding-bottom: 0.3em;
+}
+
+.md-typeset h3,
+.md-typeset h4 {
+  color:     var(--md-primary-fg-color);
+  font-size: clamp(1rem, 1.8vw, 1.2rem);
 }
 
 .md-typeset a {
-  color: #2e7d32;
+  color:           var(--md-primary-fg-color);
+  text-decoration: none;
+  border-bottom:   1px solid var(--green-scrollbar);
+  transition:      color        var(--transition-fast),
+                   border-color var(--transition-fast);
+}
+.md-typeset a:hover {
+  color:        var(--md-primary-fg-color--dark);
+  border-color: var(--md-primary-fg-color);
 }
 
-.md-typeset a:hover {
-  color: #1b5e20;
+/* ── Inline code ───────────────────────────────────────── */
+.md-typeset code {
+  background:    var(--code-bg);
+  border:        1px solid var(--code-border);
+  border-radius: 5px;
+  padding:       0.06em 0.38em;
+  font-size:     0.84em;
+  color:         var(--md-primary-fg-color);
+}
+
+/* ── Fenced code blocks ────────────────────────────────── */
+.md-typeset pre {
+  background:    var(--code-block-bg);
+  border:        1px solid var(--code-block-bdr);
+  border-radius: 10px;
+  padding:       1.1rem 1.25rem;
+  line-height:   1.65;
+}
+
+.md-typeset pre > code {
+  background:  transparent;
+  border:      none;
+  padding:     0;
+  color:       inherit;
+  font-size:   0.88rem;
+  line-height: inherit;
+}
+
+/* Code block copy button */
+.md-clipboard {
+  color:      var(--md-primary-fg-color--light);
+  transition: color var(--transition-fast);
+}
+.md-clipboard:hover {
+  color: var(--md-primary-fg-color--dark);
+}
+
+/* ── Admonitions ───────────────────────────────────────── */
+.md-typeset .admonition,
+.md-typeset details {
+  border-left-width: 3px;
+  border-radius:     0 8px 8px 0;
+  box-shadow:        none;
+}
+.md-typeset .note > .admonition-title,
+.md-typeset .note > summary {
+  background-color: var(--green-surface);
+  color:            var(--md-primary-fg-color--dark);
+}
+.md-typeset .note {
+  border-color: var(--md-primary-fg-color);
+}
+
+/* ── Tags ──────────────────────────────────────────────── */
+.md-tag {
+  background:     var(--green-surface);
+  color:          var(--green-tag-text);
+  border-radius:  20px;
+  font-weight:    500;
+  font-size:      0.7rem;
+  letter-spacing: 0.03em;
+}
+
+/* ── Buttons ───────────────────────────────────────────── */
+.md-button {
+  background-color: var(--md-primary-fg-color);
+  border-color:     var(--md-primary-fg-color);
+  border-radius:    6px;
+  transition:       background var(--transition-fast),
+                    transform  var(--transition-fast);
+}
+.md-button:hover {
+  background-color: var(--md-primary-fg-color--dark);
+  border-color:     var(--md-primary-fg-color--dark);
+  transform:        translateY(-1px);
+}
+.md-button--secondary {
+  background:   transparent;
+  border-color: var(--btn-secondary-bd);
+  color:        var(--btn-secondary-fg);
+  transition:   background    var(--transition-fast),
+                border-color  var(--transition-fast),
+                color         var(--transition-fast);
+}
+.md-button--secondary:hover {
+  background:   var(--btn-secondary-hv);
+  border-color: var(--md-primary-fg-color);
+  color:        var(--md-primary-fg-color--dark);
+}
+
+/* ── Tabs ──────────────────────────────────────────────── */
+.md-typeset .tabbed-labels > label {
+  color:      var(--toc-muted);
+  transition: color var(--transition-fast);
+}
+.md-typeset .tabbed-labels > label:hover {
+  color: var(--md-primary-fg-color);
+}
+.md-typeset .tabbed-labels > [type="radio"]:checked + label {
+  color:      var(--md-primary-fg-color);
+  box-shadow: 0 2px 0 var(--md-primary-fg-color);
+}
+
+/* ── Footer ────────────────────────────────────────────── */
+.md-footer {
+  background: var(--footer-bg);
+  border-top: 0.5px solid var(--footer-border);
+}
+.md-footer-meta {
+  background: transparent;
+}
+.md-footer__link {
+  color:      var(--md-primary-fg-color--light);
+  transition: color var(--transition-fast);
+}
+.md-footer__link:hover {
+  color: var(--md-primary-fg-color);
+}
+
+/* ── Scrollbar ─────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background:    var(--green-scrollbar);
+  border-radius: 3px;
+  transition:    background var(--transition-fast);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--md-primary-fg-color); }
+
+/* ── Reduced motion ────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation:  none !important;
+  }
 }
