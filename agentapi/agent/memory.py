@@ -65,7 +65,9 @@ class InMemoryMemory(MemoryBackend):
             self.conversation_id = create_conversation_id()
 
         # Per-conversation message storage shared by sibling views when needed.
-        self._conversations: dict[str, list[dict[str, Any]]] = _conversations or {}
+        self._conversations: dict[str, list[dict[str, Any]]] = (
+            _conversations if _conversations is not None else {}
+        )
 
         # Initialize this conversation only once so sibling views share history.
         if self.conversation_id not in self._conversations:
