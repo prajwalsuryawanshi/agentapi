@@ -238,6 +238,21 @@ class Agent:
                 )
                 continue
 
+            if retry_counts.get(call.name, 0) >= MAX_TOOL_RETRIES:
+                conversation_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.id,
+                        "name": call.name,
+                        "content": (
+                            f"Tool '{call.name}' failed validation "
+                            f"{MAX_TOOL_RETRIES} times and will not be retried."
+                        ),
+                    }
+                )
+                continue
+
+
             try:
                 args = parse_tool_args(call.arguments)
                 
