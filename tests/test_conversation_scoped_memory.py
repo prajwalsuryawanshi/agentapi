@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from agentapi import Agent, InMemoryMemory
+from agentapi import Agent, InMemoryMemory, RedisMemory
 from agentapi.providers.base import BaseProvider, ProviderResponse
 
 
@@ -34,6 +34,37 @@ class EchoProvider(BaseProvider):
         yield payload[:midpoint]
         await asyncio.sleep(0)
         yield payload[midpoint:]
+
+
+class FakeRedisClient:
+    def __init__(self):
+        self.closed = 0
+        self._lists: dict[str, list[str]] = {}
+        self._hashes: dict[str, dict[str, str]] = {}
+
+    def exists(self, key: str) -> bool:
+        return key in self._hashes
+
+    def hset(self, key: str, mapping):
+        self._hashes[key] = dict(mapping)
+
+    def expire(self, key: str, ttl: int):
+        return True
+
+    def lrange(self, key: str, start: int, end: int):
+        values = self._lists.get(key, [])
+        if end == -1:
+            return values[start:]
+        return values[start : end + 1]
+
+    def rpush(self, key: str, value: str):
+        self._lists.setdefault(key, []).append(value)
+
+    def delete(self, key: str):
+        self._lists.pop(key, None)
+
+    def close(self):
+        self.closed += 1
 
 
 def test_run_preserves_backward_compatible_behavior_without_conversation_id():
@@ -137,3 +168,32 @@ def test_stream_writes_only_to_requested_conversation():
         "stream-me",
         "stream(stream-me) seen=['stream-me']",
     ]
+
+
+def test_redis_sibling_views_do_not_close_shared_client():
+    client = FakeRedisClient()
+    base = RedisMemory(
+        redis_url="redis://localhost:6379",
+        conversation_id="550e8400-e29b-41d4-a716-446655440100",
+        _redis_client=client,
+    )
+    sibling = base.for_conversation("550e8400-e29b-41d4-a716-446655440101")
+
+    base.close()
+    sibling.close()
+
+    assert client.closed == 0
+
+
+def test_redis_owner_closes_client_once():
+    client = FakeRedisClient()
+    memory = RedisMemory(
+        redis_url="redis://localhost:6379",
+        conversation_id="550e8400-e29b-41d4-a716-446655440102",
+        _redis_client=client,
+    )
+    memory._owns_redis_client = True
+
+    memory.close()
+
+    assert client.closed == 1

@@ -113,14 +113,15 @@ class RedisMemory(MemoryBackend):
 
         if _redis_client is not None:
             self._redis = _redis_client
+            self._owns_redis_client = False
         else:
             try:
                 redis_module = import_module("redis")
             except ImportError as exc:  # pragma: no cover - depends on optional dependency
                 raise ImportError("redis package is required for RedisMemory. Install with: pip install redis") from exc
 
-            Redis = getattr(redis_module, "Redis")
-            self._redis = Redis.from_url(redis_url, decode_responses=True)
+            self._redis = redis_module.Redis.from_url(redis_url, decode_responses=True)
+            self._owns_redis_client = True
 
     @property
     def _messages_key(self) -> str:
@@ -168,7 +169,8 @@ class RedisMemory(MemoryBackend):
         self._redis.delete(self._messages_key)
 
     def close(self) -> None:
-        self._redis.close()
+        if self._owns_redis_client:
+            self._redis.close()
 
     def for_conversation(self, conversation_id: str) -> MemoryBackend:
         return RedisMemory(
