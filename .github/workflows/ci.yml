@@ -24,3 +24,9 @@ jobs:
 
       - name: Compile package
         run: python -m compileall agentapi
+
+      - name: Install test dependencies
+        run: pip install -e ".[test]"
+      
+      - name: Run tests
+        run: pytest tests/ -v

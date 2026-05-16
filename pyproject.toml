@@ -35,6 +35,10 @@ dependencies = [
 redis = [
   "redis>=5.0.0"
 ]
+test = [
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.23.0"
+]
 
 [project.urls]
 Homepage = "https://github.com/prajwalsuryawanshi/agentapi"
@@ -56,3 +60,6 @@ include = ["agentapi*"]
 
 [tool.setuptools.exclude-package-data]
 "*" = ["__pycache__/*", "*.pyc"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
