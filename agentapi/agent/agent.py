@@ -6,7 +6,13 @@ import inspect
 from typing import Any, AsyncIterator, Callable
 
 from agentapi.agent.memory import InMemoryMemory, MemoryBackend
-from agentapi.agent.tools import ToolDefinition, parse_tool_args, to_tool_definition
+from agentapi.agent.tools import (
+    BaseToolArgumentValidator,
+    ToolArgumentValidator,
+    ToolDefinition,
+    parse_tool_args,
+    to_tool_definition,
+)
 from agentapi.config.settings import get_settings
 from agentapi.errors import AgentConfigurationError
 from agentapi.providers.base import BaseProvider, ToolCall
@@ -14,7 +20,7 @@ from agentapi.providers.gemini import GeminiProvider
 from agentapi.providers.openai import OpenAIProvider
 from agentapi.providers.openrouter import OpenRouterProvider
 
-
+MAX_TOOL_RETRIES: int = 3
 ProviderFactory = Callable[["Agent", Any, str], BaseProvider]
 
 
@@ -32,6 +38,7 @@ class Agent:
         model: str | None = None,
         tools: list[Callable[..., Any]] | None = None,
         tool_calling: dict[str, Any] | None = None,
+        tool_argument_validator: BaseToolArgumentValidator | None = None,
     ) -> None:
         settings = get_settings()
 
@@ -50,6 +57,10 @@ class Agent:
         self._settings = settings
         self._provider: BaseProvider | None = provider if isinstance(provider, BaseProvider) else None
         self._tools: dict[str, ToolDefinition] = {}
+        self._validator: BaseToolArgumentValidator = (
+            tool_argument_validator
+            or ToolArgumentValidator()
+        )
 
         for func in tools or []:
             self.add_tool(func)
@@ -77,14 +88,14 @@ class Agent:
 
         conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
         provider = self._get_provider()
+        retry_counts: dict[str, int] = {} 
 
         for _ in range(max_tool_rounds + 1):
             response = await provider.chat(
                 conversation_messages,
                 tools=self._tool_schemas(),
                 tool_calling=self.tool_calling,
-            )
-
+            )     
             if response.tool_calls:
                 conversation_messages.append(
                     {
@@ -104,7 +115,7 @@ class Agent:
                     }
                 )
 
-                await self._execute_tool_calls(response.tool_calls, conversation_messages)
+                await self._execute_tool_calls(response.tool_calls, conversation_messages, retry_counts, )
                 continue
 
             self.memory.add({"role": "user", "content": message})
@@ -208,7 +219,12 @@ class Agent:
             return None
         return [tool.schema for tool in self._tools.values()]
 
-    async def _execute_tool_calls(self, calls: list[ToolCall], conversation_messages: list[dict[str, Any]]) -> None:
+    async def _execute_tool_calls(
+        self,
+        calls: list[ToolCall],
+        conversation_messages: list[dict[str, Any]],
+        retry_counts: dict[str, int],
+    ) -> None:
         for call in calls:
             tool_def = self._tools.get(call.name)
             if not tool_def:
@@ -224,7 +240,32 @@ class Agent:
 
             try:
                 args = parse_tool_args(call.arguments)
-                result = tool_def.func(**args)
+                
+                validated = self._validator.validate(tool_def.func, args)
+
+                if "error" in validated:                                   
+                    retry_counts[call.name] = retry_counts.get(call.name, 0) + 1
+
+                    if retry_counts[call.name] >= MAX_TOOL_RETRIES:
+                        output = (
+                            f"Tool '{call.name}' failed validation "
+                            f"{MAX_TOOL_RETRIES} times and will not be retried. "
+                            f"Last error: {validated['error']}"
+                        )
+                    else:
+                        output = f"Validation error: {validated['error']}"
+
+                    conversation_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.id,
+                            "name": call.name,
+                            "content": output,
+                        }
+                    )
+                    continue
+
+                result = tool_def.func(**validated)
                 if inspect.isawaitable(result):
                     result = await result
                 output = str(result)

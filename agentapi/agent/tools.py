@@ -5,9 +5,13 @@ from __future__ import annotations
 import inspect
 import json
 import types
+from abc import ABC, abstractmethod
+from datetime import datetime
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, get_args, get_origin
 from collections.abc import Callable
+
 
 @dataclass
 class ToolDefinition:
@@ -88,22 +92,23 @@ def _build_openai_tool_schema(
     properties: dict[str, Any] = {}
     required: list[str] = []
 
-    for name, param in signature.parameters.items():
+    for param_name, param in signature.parameters.items():
         annotation = param.annotation
+
         if annotation is inspect._empty:
             annotation = str
 
         param_type = _json_type(annotation)
+
         if param.default is not inspect._empty and not isinstance(param_type, list):
             param_type = [param_type, "null"]
 
-        properties[name] = {
+        properties[param_name] = {
             "type": param_type,
-            "description": f"Parameter: {name}",
+            "description": f"Parameter: {param_name}",
         }
 
-        # Strict mode expects required to include all declared properties.
-        required.append(name)
+        required.append(param_name)
 
     return {
         "type": "function",
@@ -182,3 +187,195 @@ def parse_tool_args(args_json: str) -> dict[str, Any]:
     if not args_json.strip():
         return {}
     return json.loads(args_json)
+
+
+class BaseToolArgumentValidator(ABC):
+    """Abstract base — subclass this to plug in a custom validator."""
+
+    @abstractmethod
+    def validate(
+        self,
+        func: Callable[..., Any],
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Validate and coerce args for func.
+
+        Returns:
+            dict with validated/coerced args on success.
+            dict with key "error" on failure  →  {"error": "message"}
+        """
+        ...                                   
+
+
+def _resolve_annotation(func, annotation):
+    if not isinstance(annotation, str):
+        return annotation
+    try:
+        globalns = getattr(func, "__globals__", {})
+        return eval(annotation, globalns)    
+    except Exception:
+        return annotation
+
+
+def _type_name(t):
+    return getattr(t, "__name__", repr(t))
+
+
+
+def _coerce_bool(v):
+    if isinstance(v, bool):
+        return v
+
+    if isinstance(v, int):
+        return bool(v)
+
+    if isinstance(v, str):
+
+        lowered = v.lower()
+
+        if lowered in ("true", "1", "yes"):
+            return True
+
+        if lowered in ("false", "0", "no"):
+            return False
+
+    raise ValueError
+
+
+def _coerce_list(v):
+
+    if isinstance(v, str):
+
+        result = json.loads(v)
+
+        if not isinstance(result, list):
+            raise ValueError
+
+        return result
+
+    raise ValueError
+
+
+def _coerce_dict(v):
+
+    if isinstance(v, str):
+
+        result = json.loads(v)
+
+        if not isinstance(result, dict):
+            raise ValueError
+
+        return result
+
+    raise ValueError
+
+
+
+COERCIBLE = {
+    int: (str,),
+    float: (str, int),
+    bool: (str, int),
+    str: (int, float, bool),
+    list: (str,),
+    dict: (str,),
+    datetime: (str,),
+    Path: (str,),
+}
+
+
+COERCE_FN = {
+    int: int,
+    float: float,
+    bool: _coerce_bool,
+    str: str,
+    list: _coerce_list,
+    dict: _coerce_dict,
+    datetime: datetime.fromisoformat,
+    Path: Path,
+}
+
+
+class ToolArgumentValidator(BaseToolArgumentValidator):
+
+    def validate(
+        self,
+        func: Callable[..., Any],
+        args: dict[str, Any]
+    ) -> dict[str, Any]:
+
+        sig = inspect.signature(func)
+
+        errors = []
+
+        for param_name, param in sig.parameters.items():
+
+            if param_name == "self":
+                continue
+
+         
+            if (
+                param.default is inspect.Parameter.empty
+                and param_name not in args
+            ):
+
+                errors.append(
+                    f"missing required argument: {param_name}"
+                )
+
+                continue
+
+            if param_name not in args:
+                continue
+
+            expected_type = _resolve_annotation(func, param.annotation) 
+            value = args.get(param_name)
+
+            if expected_type is inspect.Parameter.empty:
+                continue
+
+            try:
+
+                if (
+                    isinstance(value, expected_type)
+                    and not (
+                        expected_type is int
+                        and type(value) is bool
+                    )
+                ):
+                    continue
+
+            except TypeError:
+                pass
+
+            if (
+                expected_type in COERCIBLE
+                and isinstance(
+                    value,
+                    COERCIBLE[expected_type]
+                )
+            ):
+
+                try:
+
+                    args[param_name] = (
+                        COERCE_FN[expected_type](value)
+                    )
+
+                except (ValueError, TypeError):
+                    errors.append(
+                        f"invalid {_type_name(expected_type)} "    
+                        f"for argument: {param_name}"
+                    )
+
+            else:
+                errors.append(
+                    f"argument '{param_name}': expected "
+                    f"{_type_name(expected_type)}, "               
+                    f"got {type(value).__name__}"
+                )
+
+        if errors:
+            return {"error": errors[0]}
+
+        return args
