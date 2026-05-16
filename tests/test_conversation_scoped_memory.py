@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 
 from agentapi import Agent, InMemoryMemory, RedisMemory
+from agentapi.agent.memory import MemoryBackend
 from agentapi.providers.base import BaseProvider, ProviderResponse
+import pytest
 
 
 class EchoProvider(BaseProvider):
@@ -65,6 +67,21 @@ class FakeRedisClient:
 
     def close(self):
         self.closed += 1
+
+
+class UnsupportedMemory(MemoryBackend):
+    def __init__(self):
+        self._messages: list[dict[str, str]] = []
+
+    @property
+    def messages(self) -> list[dict[str, str]]:
+        return self._messages
+
+    def add(self, message: dict[str, str]) -> None:
+        self._messages.append(message)
+
+    def reset(self) -> None:
+        self._messages = []
 
 
 def test_run_preserves_backward_compatible_behavior_without_conversation_id():
@@ -168,6 +185,13 @@ def test_stream_writes_only_to_requested_conversation():
         "stream-me",
         "stream(stream-me) seen=['stream-me']",
     ]
+
+
+def test_custom_backend_without_conversation_support_fails_fast():
+    agent = Agent(system_prompt="sys", provider=EchoProvider(), memory=UnsupportedMemory())
+
+    with pytest.raises(NotImplementedError, match="does not support conversation-scoped memory resolution"):
+        asyncio.run(agent.run("hello", conversation_id="550e8400-e29b-41d4-a716-446655440040"))
 
 
 def test_redis_sibling_views_do_not_close_shared_client():

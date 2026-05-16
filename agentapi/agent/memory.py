@@ -36,11 +36,13 @@ class MemoryBackend(ABC):
 
         Backends that support multi-conversation resolution can override this
         to return a sibling/backend view for the given conversation. The
-        default implementation preserves historical behavior for existing
-        custom backends by returning ``self`` unchanged.
+        default implementation fails fast so callers cannot silently assume
+        conversation-scoped isolation when a custom backend does not support it.
         """
 
-        return self
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support conversation-scoped memory resolution"
+        )
 
 
 class InMemoryMemory(MemoryBackend):
