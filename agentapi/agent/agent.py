@@ -65,17 +65,33 @@ class Agent:
 
         self.memory.reset()
 
-    def _conversation_messages(self, extra_messages: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    def _resolve_memory(self, conversation_id: str | None = None) -> MemoryBackend:
+        if conversation_id is None:
+            return self.memory
+        return self.memory.for_conversation(conversation_id)
+
+    def _conversation_messages(
+        self,
+        memory: MemoryBackend,
+        extra_messages: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = [{"role": "system", "content": self.system_prompt}]
-        messages.extend(self.memory.messages)
+        messages.extend(memory.messages)
         if extra_messages:
             messages.extend(extra_messages)
         return messages
 
-    async def run(self, message: str, *, max_tool_rounds: int = 3) -> str:
+    async def run(
+        self,
+        message: str,
+        *,
+        max_tool_rounds: int = 3,
+        conversation_id: str | None = None,
+    ) -> str:
         """Execute a chat completion with optional tool-calling loop."""
 
-        conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
+        memory = self._resolve_memory(conversation_id)
+        conversation_messages = self._conversation_messages(memory, [{"role": "user", "content": message}])
         provider = self._get_provider()
 
         for _ in range(max_tool_rounds + 1):
@@ -107,19 +123,25 @@ class Agent:
                 await self._execute_tool_calls(response.tool_calls, conversation_messages)
                 continue
 
-            self.memory.add({"role": "user", "content": message})
-            self.memory.add({"role": "assistant", "content": response.content})
+            memory.add({"role": "user", "content": message})
+            memory.add({"role": "assistant", "content": response.content})
             return response.content
 
         fallback = "Tool loop reached max rounds without final response"
-        self.memory.add({"role": "user", "content": message})
-        self.memory.add({"role": "assistant", "content": fallback})
+        memory.add({"role": "user", "content": message})
+        memory.add({"role": "assistant", "content": fallback})
         return fallback
 
-    async def stream(self, message: str) -> AsyncIterator[str]:
+    async def stream(
+        self,
+        message: str,
+        *,
+        conversation_id: str | None = None,
+    ) -> AsyncIterator[str]:
         """Stream model tokens and persist final assistant message."""
 
-        conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
+        memory = self._resolve_memory(conversation_id)
+        conversation_messages = self._conversation_messages(memory, [{"role": "user", "content": message}])
         provider = self._get_provider()
 
         collected: list[str] = []
@@ -132,8 +154,8 @@ class Agent:
             yield token
 
         full_text = "".join(collected)
-        self.memory.add({"role": "user", "content": message})
-        self.memory.add({"role": "assistant", "content": full_text})
+        memory.add({"role": "user", "content": message})
+        memory.add({"role": "assistant", "content": full_text})
 
     def _create_provider(self, settings: Any) -> BaseProvider:
         custom_factory = self._custom_provider_factories.get(self.provider_name)

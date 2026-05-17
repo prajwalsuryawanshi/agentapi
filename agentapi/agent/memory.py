@@ -31,6 +31,19 @@ class MemoryBackend(ABC):
     def reset(self) -> None:
         """Clear all stored messages for the conversation."""
 
+    def for_conversation(self, conversation_id: str) -> "MemoryBackend":
+        """Return a backend bound to a specific conversation.
+
+        Backends that support multi-conversation resolution can override this
+        to return a sibling/backend view for the given conversation. The
+        default implementation fails fast so callers cannot silently assume
+        conversation-scoped isolation when a custom backend does not support it.
+        """
+
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support conversation-scoped memory resolution"
+        )
+
 
 class InMemoryMemory(MemoryBackend):
     """Stores chat messages in process memory with per-conversation isolation.
@@ -42,6 +55,8 @@ class InMemoryMemory(MemoryBackend):
     def __init__(
         self,
         conversation_id: str | None = None,
+        *,
+        _conversations: dict[str, list[dict[str, Any]]] | None = None,
     ) -> None:
         # Validate and normalize to canonical UUID string if provided; auto-generate otherwise.
         if conversation_id is not None:
@@ -49,11 +64,14 @@ class InMemoryMemory(MemoryBackend):
         else:
             self.conversation_id = create_conversation_id()
 
-        # Per-conversation message storage and system prompts.
-        self._conversations: dict[str, list[dict[str, Any]]] = {}
+        # Per-conversation message storage shared by sibling views when needed.
+        self._conversations: dict[str, list[dict[str, Any]]] = (
+            _conversations if _conversations is not None else {}
+        )
 
-        # Initialize this conversation.
-        self._conversations[self.conversation_id] = []
+        # Initialize this conversation only once so sibling views share history.
+        if self.conversation_id not in self._conversations:
+            self._conversations[self.conversation_id] = []
 
     @property
     def messages(self) -> list[dict[str, Any]]:
@@ -66,6 +84,12 @@ class InMemoryMemory(MemoryBackend):
 
     def reset(self) -> None:
         self._conversations[self.conversation_id] = []
+
+    def for_conversation(self, conversation_id: str) -> MemoryBackend:
+        return InMemoryMemory(
+            conversation_id=conversation_id,
+            _conversations=self._conversations,
+        )
 
 
 class RedisMemory(MemoryBackend):
@@ -82,20 +106,26 @@ class RedisMemory(MemoryBackend):
         user_id: str | None = None,
         tenant_id: str | None = None,
         ttl_seconds: int = 7 * 24 * 60 * 60,
+        _redis_client: Any | None = None,
     ) -> None:
-        try:
-            redis_module = import_module("redis")
-        except ImportError as exc:  # pragma: no cover - depends on optional dependency
-            raise ImportError("redis package is required for RedisMemory. Install with: pip install redis") from exc
-
-        Redis = getattr(redis_module, "Redis")
-
         # Validate and normalize to canonical UUID string.
+        self._redis_url = redis_url
         self.conversation_id = str(UUID(conversation_id))
         self.user_id = user_id
         self.tenant_id = tenant_id
         self._ttl_seconds = ttl_seconds
-        self._redis = Redis.from_url(redis_url, decode_responses=True)
+
+        if _redis_client is not None:
+            self._redis = _redis_client
+            self._owns_redis_client = False
+        else:
+            try:
+                redis_module = import_module("redis")
+            except ImportError as exc:  # pragma: no cover - depends on optional dependency
+                raise ImportError("redis package is required for RedisMemory. Install with: pip install redis") from exc
+
+            self._redis = redis_module.Redis.from_url(redis_url, decode_responses=True)
+            self._owns_redis_client = True
 
     @property
     def _messages_key(self) -> str:
@@ -143,4 +173,15 @@ class RedisMemory(MemoryBackend):
         self._redis.delete(self._messages_key)
 
     def close(self) -> None:
-        self._redis.close()
+        if self._owns_redis_client:
+            self._redis.close()
+
+    def for_conversation(self, conversation_id: str) -> MemoryBackend:
+        return RedisMemory(
+            redis_url=self._redis_url,
+            conversation_id=conversation_id,
+            user_id=self.user_id,
+            tenant_id=self.tenant_id,
+            ttl_seconds=self._ttl_seconds,
+            _redis_client=self._redis,
+        )
