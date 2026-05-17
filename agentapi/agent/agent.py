@@ -125,6 +125,21 @@ class Agent:
 
         conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
         provider = self._get_provider()
+        tool_schemas = self._tool_schemas()
+
+        if not tool_schemas:
+            collected: list[str] = []
+            async for token in provider.stream(
+                conversation_messages,
+                tools=None,
+                tool_calling=self.tool_calling,
+            ):
+                collected.append(token)
+                yield token
+
+            self.memory.add({"role": "user", "content": message})
+            self.memory.add({"role": "assistant", "content": "".join(collected)})
+            return
 
         for _ in range(max_tool_rounds + 1):
             response = await provider.chat(
