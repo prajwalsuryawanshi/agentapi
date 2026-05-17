@@ -123,18 +123,18 @@ class Agent:
         streaming the final assistant response.
         """
 
-        self.memory.add({"role": "user", "content": message})
+        conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
         provider = self._get_provider()
 
         for _ in range(max_tool_rounds + 1):
             response = await provider.chat(
-                self.memory.messages,
+                conversation_messages,
                 tools=self._tool_schemas(),
                 tool_calling=self.tool_calling,
             )
 
             if response.tool_calls:
-                self.memory.add(
+                conversation_messages.append(
                     {
                         "role": "assistant",
                         "content": response.content or "",
@@ -151,22 +151,24 @@ class Agent:
                         ],
                     }
                 )
-                await self._execute_tool_calls(response.tool_calls)
+                await self._execute_tool_calls(response.tool_calls, conversation_messages)
                 continue
 
             collected: list[str] = []
             async for token in provider.stream(
-                self.memory.messages,
+                conversation_messages,
                 tools=None,
                 tool_calling=self.tool_calling,
             ):
                 collected.append(token)
                 yield token
 
+            self.memory.add({"role": "user", "content": message})
             self.memory.add({"role": "assistant", "content": "".join(collected)})
             return
 
         fallback = "Tool loop reached max rounds without final response"
+        self.memory.add({"role": "user", "content": message})
         self.memory.add({"role": "assistant", "content": fallback})
         yield fallback
 
