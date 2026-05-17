@@ -47,6 +47,7 @@ def numpy_search(query: str, limit: int) -> list[str]:
 
 @tool
 def undocumented(count: int) -> int:
+    # Deliberately no docstring: validates the generic fallback path.
     return count
 
 
