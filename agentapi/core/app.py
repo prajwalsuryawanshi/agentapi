@@ -136,7 +136,7 @@ class AgentAPI(FastAPI):
         )
 
         html = bytes(base.body).decode("utf-8")
-        inject = f"""
+        inject = """
 <style>
     body {
         background: #0b1220;
@@ -212,17 +212,18 @@ class AgentAPI(FastAPI):
     }
 </style>
 <script>
-window.addEventListener('load', function () {{
-  var topbarLogo = document.querySelector('.topbar-wrapper .link img');
-  if (topbarLogo) {{
-        topbarLogo.src = '{self._agentapi_favicon_path}';
-    topbarLogo.alt = 'AgentAPI';
+window.addEventListener('load', function () {
+    var topbarLogo = document.querySelector('.topbar-wrapper .link img');
+    if (topbarLogo) {
+        topbarLogo.src = '__FAVICON_PATH__';
+        topbarLogo.alt = 'AgentAPI';
         topbarLogo.style.height = '28px';
-    topbarLogo.style.width = 'auto';
-  }}
-}});
+        topbarLogo.style.width = 'auto';
+    }
+});
 </script>
 """
+        inject = inject.replace("__FAVICON_PATH__", self._agentapi_favicon_path)
         return HTMLResponse(html.replace("</body>", f"{inject}</body>"))
 
     async def _swagger_ui_redirect(self) -> Response:

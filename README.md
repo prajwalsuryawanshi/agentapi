@@ -7,11 +7,11 @@
 [![Status](https://img.shields.io/badge/status-MVP-success.svg)](#project-status)
 [![Docs](https://img.shields.io/badge/docs-site-blue)](https://agentapi.prajwalsuryawanshi.in)
 
-AgentAPI is an open-source Python framework for building agentic AI backends with a clean developer experience: minimal setup, provider abstraction, tool calling, memory, and streaming-first APIs.
+AgentAPI is a lightweight Python framework for building agent backends with FastAPI-style ergonomics: provider abstraction, tool calling, conversation memory, and streaming-first APIs.
 
-It is designed for teams that want FastAPI-style simplicity for LLM agents, without heavy orchestration overhead.
+It targets teams who want minimal setup for agentic workflows while keeping the system flexible for production (Redis memory, custom providers, tool schemas).
 
-Documentation site: `https://agentapi.prajwalsuryawanshi.in`
+Documentation site: https://agentapi.prajwalsuryawanshi.in
 
 ## Table of Contents
 
@@ -68,38 +68,49 @@ pip install -e .
 Create `main.py`:
 
 ```python
-from agentapi import AgentApp, Agent
+from agentapi import AgentAPI, Agent, InMemoryMemory, create_conversation_id
 
-app = AgentApp()
+app = AgentAPI()
 
+# Agent owns the system prompt; memory stores only user/assistant/tool turns
 agent = Agent(
-    system_prompt="You are a helpful assistant",
-    provider="openai",
+  system_prompt="You are a helpful assistant",
+  provider="openai",
+  memory=InMemoryMemory(),
 )
 
 
 @app.chat("/chat")
-async def chat(message: str):
-    return await agent.run(message)
+async def chat(message: str, conversation_id: str | None = None):
+  # create a conversation id for anonymous users
+  conversation_id = conversation_id or create_conversation_id()
+  return await agent.run(message, conversation_id=conversation_id)
 
 
 @app.chat("/stream")
-async def stream_chat(message: str):
-    return agent.stream(message)
+async def stream_chat(message: str, conversation_id: str | None = None):
+  conversation_id = conversation_id or create_conversation_id()
+  return agent.stream(message, conversation_id=conversation_id)
 ```
 
-Run it:
+Run the app:
 
 ```bash
 uvicorn main:app --reload
 ```
 
-Open docs:
+Open docs locally:
 
 - `http://127.0.0.1:8000/docs`
 - `http://127.0.0.1:8000/redoc`
 
-## Provider Configuration
+## Memory and Providers
+
+AgentAPI separates the Agent (which owns `system_prompt`) from the memory backend. Memory backends store conversational turns and are conversation-scoped by a `conversation_id` (UUID). Use `InMemoryMemory` for local development and `RedisMemory` for multi-worker/production deployments.
+
+Provider configuration remains the same — set API keys via `.env` and choose a provider name (or pass a custom `BaseProvider` instance).
+
+### Provider Configuration
 
 Create `.env`:
 
@@ -212,6 +223,12 @@ AgentAPI converts common runtime issues into clear API-level errors:
 - Upstream provider failures -> provider error message with status context.
 - Streaming endpoints emit SSE error events instead of hard crashes.
 
+## Examples & docs
+
+See `examples/` for runnable examples and `docs/` for the memory abstraction guide and orchestration notes. Key example:
+
+- `examples/multi_user_example.py` — conversation-aware FastAPI app using `create_conversation_id()` and `InMemoryMemory`.
+
 ## Project Structure
 
 ```text
@@ -256,6 +273,7 @@ Implemented:
 - Add richer observability and tracing hooks.
 - Improve generated project templates.
 - Add test suite and CI workflows.
+ - Automated RAG for code — `agent.add_knowledge('url-to-file')`.
 
 ## Contributing
 
@@ -300,4 +318,4 @@ Note: package names on PyPI are normalized, so use lowercase `agentapi-core`.
 
 ## License
 
-MIT License. See `LICENSE`.
+MIT License. See [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
