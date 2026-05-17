@@ -7,6 +7,7 @@ from agentapi.agent.tools import to_tool_definition
 
 
 def _properties(func):
+    """Return generated JSON schema properties for a decorated tool."""
     definition = to_tool_definition(func)
     return definition.schema["function"]["parameters"]["properties"]
 
@@ -57,6 +58,7 @@ def summary_only(topic: str) -> str:
 
 
 def test_google_style_docstring_param_descriptions_are_used() -> None:
+    """Google-style Args sections should replace generic schema descriptions."""
     properties = _properties(google_weather)
 
     assert properties["city"]["description"] == 'City name or "lat,lon" coordinates to query.'
@@ -66,6 +68,7 @@ def test_google_style_docstring_param_descriptions_are_used() -> None:
 
 
 def test_numpy_style_docstring_param_descriptions_are_used() -> None:
+    """NumPy Parameters sections should stop before the next docstring section."""
     properties = _properties(numpy_search)
 
     assert properties["query"]["description"] == "Natural-language search query."
@@ -73,12 +76,14 @@ def test_numpy_style_docstring_param_descriptions_are_used() -> None:
 
 
 def test_missing_docstring_falls_back_to_generic_parameter_description() -> None:
+    """Tools without docstrings should preserve existing fallback descriptions."""
     properties = _properties(undocumented)
 
     assert properties["count"]["description"] == "Parameter: count"
 
 
 def test_docstring_without_param_section_falls_back_to_generic_description() -> None:
+    """Docstrings without parameter sections should not alter parameter fallback text."""
     properties = _properties(summary_only)
 
     assert properties["topic"]["description"] == "Parameter: topic"

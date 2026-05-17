@@ -85,6 +85,7 @@ _NUMPY_PARAM_RE = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*:\s*.+$")
 
 
 def _parse_docstring_param_descriptions(func: Callable[..., Any]) -> dict[str, str]:
+    """Return parameter descriptions parsed from supported docstring styles."""
     docstring = inspect.getdoc(func)
     if not docstring:
         return {}
@@ -97,6 +98,7 @@ def _parse_docstring_param_descriptions(func: Callable[..., Any]) -> dict[str, s
 
 
 def _parse_google_param_descriptions(lines: list[str]) -> dict[str, str]:
+    """Parse Args/Arguments/Parameters sections written in Google style."""
     descriptions: dict[str, str] = {}
     section_names = {"args:", "arguments:", "parameters:"}
     in_section = False
@@ -137,6 +139,7 @@ def _parse_google_param_descriptions(lines: list[str]) -> dict[str, str]:
 
 
 def _parse_numpy_param_descriptions(lines: list[str]) -> dict[str, str]:
+    """Parse NumPy-style Parameters sections into schema descriptions."""
     descriptions: dict[str, str] = {}
     in_section = False
     expecting_rule = False
