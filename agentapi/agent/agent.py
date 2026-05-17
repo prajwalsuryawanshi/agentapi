@@ -119,8 +119,15 @@ class Agent:
     async def stream(self, message: str, *, max_tool_rounds: int = 3) -> AsyncIterator[str]:
         """
         Stream model tokens and persist final assistant message.
-        Executes tool-calling loop before
-        streaming the final assistant response.
+
+        If tools are registered, executes the tool-calling loop (identical to
+        agent.run()) until the model produces a plain text response, then
+        streams that final response token-by-token.  This ensures tools are
+        always invoked before any tokens reach the caller, preventing the model
+        from hallucinating tool-dependent answers.
+
+        If no tools are registered the response is streamed directly without an
+        intermediate non-streaming round-trip.
         """
 
         conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
@@ -144,7 +151,7 @@ class Agent:
         for _ in range(max_tool_rounds + 1):
             response = await provider.chat(
                 conversation_messages,
-                tools=self._tool_schemas(),
+                tools=tool_schemas,
                 tool_calling=self.tool_calling,
             )
 
@@ -169,17 +176,19 @@ class Agent:
                 await self._execute_tool_calls(response.tool_calls, conversation_messages)
                 continue
 
+            self.memory.add({"role": "user", "content": message})
+
             collected: list[str] = []
             async for token in provider.stream(
-                conversation_messages,
+                conversation_messages + [{"role": "assistant", "content": response.content or ""}],
                 tools=None,
                 tool_calling=self.tool_calling,
             ):
                 collected.append(token)
                 yield token
 
-            self.memory.add({"role": "user", "content": message})
-            self.memory.add({"role": "assistant", "content": "".join(collected)})
+            final_content = "".join(collected) or response.content or ""
+            self.memory.add({"role": "assistant", "content": final_content})
             return
 
         fallback = "Tool loop reached max rounds without final response"
