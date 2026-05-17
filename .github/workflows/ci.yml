@@ -20,7 +20,10 @@ jobs:
       - name: Install package
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
+          pip install -e . pytest
 
       - name: Compile package
         run: python -m compileall agentapi
+
+      - name: Run tests
+        run: python -m pytest -q
