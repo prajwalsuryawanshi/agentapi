@@ -47,6 +47,36 @@ class OpenAICompatibleProvider(BaseProvider):
             "parallel_tool_calls": True,
         }
 
+    def _extract_message(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Extract and validate message from provider response."""
+        choices = data.get("choices")
+        if not isinstance(choices, list):
+            raise AgentProviderError(
+                f"Provider returned a non-list 'choices' field for model '{self.model}'. "
+                f"Raw response: {str(data)[:200]}",
+                status_code=502,
+            )
+        if not choices:
+            raise AgentProviderError(
+                f"Provider returned an empty 'choices' list for model '{self.model}'. "
+                f"Raw response: {str(data)[:200]}",
+                status_code=502,
+            )
+        if not isinstance(choices[0], dict):
+            raise AgentProviderError(
+                f"Provider returned a non-dict entry at 'choices[0]' for model '{self.model}'. "
+                f"Got: {type(choices[0]).__name__}",
+                status_code=502,
+            )
+
+        message = choices[0].get("message")
+        if message is None:
+            raise AgentProviderError(
+                f"Provider returned a 'choices[0]' entry with no 'message' field for model '{self.model}'.",
+                status_code=502,
+            )
+        return message
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -88,7 +118,7 @@ class OpenAICompatibleProvider(BaseProvider):
                     status_code=502,
                 ) from exc
 
-        message = data["choices"][0]["message"]
+        message = self._extract_message(data)
         raw_tool_calls = message.get("tool_calls") or []
         tool_calls = [
             ToolCall(
@@ -149,6 +179,9 @@ class OpenAICompatibleProvider(BaseProvider):
 
                         choices = chunk.get("choices") or []
                         if not choices:
+                            continue
+
+                        if not isinstance(choices[0], dict):
                             continue
 
                         delta = choices[0].get("delta") or {}
