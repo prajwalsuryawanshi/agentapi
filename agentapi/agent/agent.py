@@ -116,24 +116,85 @@ class Agent:
         self.memory.add({"role": "assistant", "content": fallback})
         return fallback
 
-    async def stream(self, message: str) -> AsyncIterator[str]:
-        """Stream model tokens and persist final assistant message."""
+    async def stream(self, message: str, *, max_tool_rounds: int = 3) -> AsyncIterator[str]:
+        """
+        Stream model tokens and persist final assistant message.
+
+        If tools are registered, executes the tool-calling loop (identical to
+        agent.run()) until the model produces a plain text response, then
+        streams that final response token-by-token.  This ensures tools are
+        always invoked before any tokens reach the caller, preventing the model
+        from hallucinating tool-dependent answers.
+
+        If no tools are registered the response is streamed directly without an
+        intermediate non-streaming round-trip.
+        """
 
         conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
         provider = self._get_provider()
+        tool_schemas = self._tool_schemas()
 
-        collected: list[str] = []
-        async for token in provider.stream(
-            conversation_messages,
-            tools=self._tool_schemas(),
-            tool_calling=self.tool_calling,
-        ):
-            collected.append(token)
-            yield token
+        if not tool_schemas:
+            collected: list[str] = []
+            async for token in provider.stream(
+                conversation_messages,
+                tools=None,
+                tool_calling=self.tool_calling,
+            ):
+                collected.append(token)
+                yield token
 
-        full_text = "".join(collected)
+            self.memory.add({"role": "user", "content": message})
+            self.memory.add({"role": "assistant", "content": "".join(collected)})
+            return
+
+        for _ in range(max_tool_rounds + 1):
+            response = await provider.chat(
+                conversation_messages,
+                tools=tool_schemas,
+                tool_calling=self.tool_calling,
+            )
+
+            if response.tool_calls:
+                conversation_messages.append(
+                    {
+                        "role": "assistant",
+                        "content": response.content or "",
+                        "tool_calls": [
+                            {
+                                "id": call.id,
+                                "type": "function",
+                                "function": {
+                                    "name": call.name,
+                                    "arguments": call.arguments,
+                                },
+                            }
+                            for call in response.tool_calls
+                        ],
+                    }
+                )
+                await self._execute_tool_calls(response.tool_calls, conversation_messages)
+                continue
+
+            self.memory.add({"role": "user", "content": message})
+
+            collected: list[str] = []
+            async for token in provider.stream(
+                conversation_messages + [{"role": "assistant", "content": response.content or ""}],
+                tools=None,
+                tool_calling=self.tool_calling,
+            ):
+                collected.append(token)
+                yield token
+
+            final_content = "".join(collected) or response.content or ""
+            self.memory.add({"role": "assistant", "content": final_content})
+            return
+
+        fallback = "Tool loop reached max rounds without final response"
         self.memory.add({"role": "user", "content": message})
-        self.memory.add({"role": "assistant", "content": full_text})
+        self.memory.add({"role": "assistant", "content": fallback})
+        yield fallback
 
     def _create_provider(self, settings: Any) -> BaseProvider:
         custom_factory = self._custom_provider_factories.get(self.provider_name)
