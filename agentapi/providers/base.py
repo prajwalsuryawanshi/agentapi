@@ -28,6 +28,11 @@ class ProviderResponse:
 class BaseProvider(ABC):
     """Abstract provider contract used by Agent."""
 
+    def default_tool_calling(self) -> dict[str, Any]:
+        """Return provider-native defaults for tool/function calling."""
+
+        return {}
+
     @abstractmethod
     async def chat(
         self,
