@@ -42,7 +42,7 @@ class Agent:
             self.provider_name = (provider or settings.default_provider).lower()
 
         self.model = model or self._default_model_for(self.provider_name)
-        self.tool_calling = tool_calling or {}
+        self.tool_calling = dict(tool_calling or {})
         self.memory = memory or InMemoryMemory()
 
         self._settings = settings
