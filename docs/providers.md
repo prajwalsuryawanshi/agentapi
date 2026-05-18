@@ -1,103 +1,217 @@
-# **Providers**
+# Providers
 
-Providers act as the intelligent core of the application, responsible for interpreting user prompts, managing context, and communicating with underlying Large Language Models (LLMs). They are essential components that handle the translation of abstract tasks into concrete instructions for specific LLM APIs.
+Providers are the intelligence layer behind AgentAPI. They handle communication with Large Language Models (LLMs), manage tool-calling behavior, and process conversational context through a unified interface.
 
-The system is designed with a flexible architecture that allows you to easily switch between built-in providers or implement custom ones to suit your specific requirements.
+AgentAPI is designed with a flexible provider architecture, allowing you to switch between built-in providers or implement custom providers depending on your workflow and infrastructure needs.
 
-## **Built-in Providers**
+---
 
-The application comes pre-configured with support for leading LLM providers, ensuring you have access to powerful models right out of the box.
+## Built-in Providers
 
-### **OpenAI Provider (Default)**
+AgentAPI includes support for multiple providers out of the box.
 
-The OpenAIProvider is the default engine, leveraging OpenAI's robust models like gpt-4o. It is optimized for general-purpose tasks, instruction following, and complex reasoning.
+| Provider     | Description                                                     | Default Model      |
+| ------------ | --------------------------------------------------------------- | ------------------ |
+| `openai`     | Optimized for general-purpose reasoning, chat, and tool calling | `gpt-4o-mini`      |
+| `gemini`     | Google's Gemini models with native function-calling support     | `gemini-2.5-flash` |
+| `openrouter` | Access OpenAI-compatible models through OpenRouter              | `gpt-4o-mini`      |
 
-#### **Configuration**
+---
 
-To configure the OpenAI provider, you must set your API key in your environment variables:
+## Selecting a Provider
 
-OPENAI\_API\_KEY=your\_api\_key\_here
+You can select a provider directly when creating an `Agent`.
 
-**Default Model:** gpt-4o
+```python
+from agentapi import Agent
 
-### **Anthropic Provider**
+agent = Agent(
+    system_prompt="You are helpful",
+    provider="gemini",
+)
+```
 
-The AnthropicProvider integrates with Anthropic's Claude models, such as claude-3-5-sonnet-20240620. Claude models are often preferred for tasks requiring extensive context windows, nuanced understanding, or specific stylistic outputs.
+If no provider is specified, AgentAPI automatically falls back to the `DEFAULT_PROVIDER` environment variable.
 
-#### **Configuration**
+---
 
-To use the Anthropic provider, set your API key:
+## Provider Configuration
 
-ANTHROPIC\_API\_KEY=your\_api\_key\_here
+Configure provider API keys using environment variables.
 
-**Default Model:** claude-3-5-sonnet-20240620
+### OpenAI
 
-## **Creating a Custom Provider**
+```bash
+OPENAI_API_KEY=your_api_key_here
+```
 
-The architecture is highly extensible. If you need to integrate a specialized LLM, a local model, or a custom API endpoint, you can easily create a custom provider.
+### Gemini
 
-### **The LLMProvider Interface**
+```bash
+GEMINI_API_KEY=your_api_key_here
+```
 
-All providers must implement the abstract LLMProvider class. This ensures consistency and interchangeability across the system.
+### OpenRouter
 
-The core method you must implement is:
+```bash
+OPENROUTER_API_KEY=your_api_key_here
+```
 
-async def generate\_response(self, prompt: str, system\_prompt: str) \-\> str:  
-    """  
-    Generates a response from the LLM.
+You can also explicitly override the default model:
 
-    Args:  
-        prompt (str): The primary input or question from the user.  
-        system\_prompt (str): Contextual instructions guiding the model's behavior.
+```python
+agent = Agent(
+    system_prompt="You are helpful",
+    provider="openai",
+    model="gpt-4o",
+)
+```
 
-    Returns:  
-        str: The generated response from the model.  
-    """  
+---
+
+## Provider-specific Tool Calling Defaults
+
+AgentAPI automatically applies provider-aware defaults for tool-calling behavior.
+
+### OpenAI-compatible Providers
+
+```python
+tool_choice = "auto"
+parallel_tool_calls = True
+```
+
+### Gemini
+
+```python
+mode = "AUTO"
+```
+
+You can override these defaults using the `tool_calling=` parameter when needed.
+
+---
+
+## Custom Providers
+
+AgentAPI supports fully custom providers through the `BaseProvider` interface.
+
+This allows you to:
+
+* integrate internal LLM infrastructure
+* connect private APIs
+* use self-hosted models
+* customize orchestration behavior
+
+---
+
+## The BaseProvider Interface
+
+All custom providers should inherit from the abstract `BaseProvider` class.
+
+```python
+async def generate_response(
+    self,
+    prompt: str,
+    system_prompt: str,
+) -> str:
+    """
+    Generate a response from the LLM.
+
+    Args:
+        prompt (str):
+            The primary user input or query.
+
+        system_prompt (str):
+            Instructions guiding model behavior.
+
+    Returns:
+        str:
+            The generated model response.
+    """
     pass
+```
 
-### **Example: Custom HTTP Provider**
+---
 
-Below is a practical example of implementing a custom provider that communicates with an arbitrary REST API endpoint.
+## Example: Custom HTTP Provider
 
-import aiohttp  
-from core.providers import LLMProvider
+Below is a practical example of implementing a provider using a custom HTTP endpoint.
 
-class MyCustomProvider(LLMProvider):  
-    """  
-    A custom provider communicating with a private LLM endpoint.  
-    """  
-    def \_\_init\_\_(self, api\_url: str, api\_key: str):  
-        self.api\_url \= api\_url  
-        self.api\_key \= api\_key
+```python
+import aiohttp
 
-    async def generate\_response(self, prompt: str, system\_prompt: str) \-\> str:  
-        headers \= {  
-            "Authorization": f"Bearer {self.api\_key}",  
-            "Content-Type": "application/json"  
-        }  
-          
-        payload \= {  
-            "messages": \[  
-                {"role": "system", "content": system\_prompt},  
-                {"role": "user", "content": prompt}  
-            \]  
+from agentapi.providers.base import BaseProvider
+
+
+class MyCustomProvider(BaseProvider):
+    """
+    A custom provider communicating with a private LLM endpoint.
+    """
+
+    def __init__(self, api_url: str, api_key: str):
+        self.api_url = api_url
+        self.api_key = api_key
+
+    async def generate_response(
+        self,
+        prompt: str,
+        system_prompt: str,
+    ) -> str:
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
         }
 
-        async with aiohttp.ClientSession() as session:  
-            async with session.post(  
-                self.api\_url,   
-                headers=headers,   
-                json=payload  
-            ) as response:  
-                  
-                \# Ensure the request was successful  
-                response.raise\_for\_status()  
-                  
-                data \= await response.json()  
-                  
-                \# Extract and return the relevant text from the response  
-                return data\["choices"\]\[0\]\["message"\]\["content"\]
+        payload = {
+            "messages": [
+                {
+                    "role": "system",
+                    "content": system_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ]
+        }
 
-### **Registering Your Custom Provider**
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                self.api_url,
+                headers=headers,
+                json=payload,
+            ) as response:
 
-Once your custom provider is defined, you can integrate it into your workflow by instantiating it and passing it to the relevant components (e.g., an Agent or the core application controller) in place of the built-in providers.
+                response.raise_for_status()
+
+                data = await response.json()
+
+                return data["choices"][0]["message"]["content"]
+```
+
+---
+
+## Registering a Custom Provider
+
+Once your provider is implemented, register it using `Agent.register_provider()`.
+
+```python
+from agentapi import Agent
+
+Agent.register_provider(
+    "myprovider",
+    lambda agent, settings, model: MyCustomProvider(
+        api_url="https://example.com/v1/chat",
+        api_key="your_api_key",
+    ),
+)
+```
+
+Then use it like any built-in provider:
+
+```python
+agent = Agent(
+    system_prompt="You are helpful",
+    provider="myprovider",
+)
+```
