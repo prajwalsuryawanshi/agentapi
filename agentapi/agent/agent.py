@@ -42,9 +42,7 @@ class Agent:
             self.provider_name = (provider or settings.default_provider).lower()
 
         self.model = model or self._default_model_for(self.provider_name)
-        self.tool_calling = self._default_tool_calling_for(self.provider_name)
-        if tool_calling:
-            self.tool_calling.update(tool_calling)
+        self.tool_calling = tool_calling or {}
         self.memory = memory or InMemoryMemory()
 
         self._settings = settings
@@ -200,18 +198,6 @@ class Agent:
         if provider_name == "anthropic":
             return "claude-3-5-sonnet-20241022"
         return "gpt-4o-mini"
-
-    def _default_tool_calling_for(self, provider_name: str) -> dict[str, Any]:
-        if provider_name == "gemini":
-            return {
-                "mode": "AUTO",  # Gemini functionCallingConfig mode
-            }
-
-        # OpenAI-compatible defaults.
-        return {
-            "tool_choice": "auto",
-            "parallel_tool_calls": True,
-        }
 
     def _tool_schemas(self) -> list[dict[str, Any]] | None:
         if not self._tools:

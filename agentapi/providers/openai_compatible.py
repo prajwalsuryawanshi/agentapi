@@ -39,6 +39,14 @@ class OpenAICompatibleProvider(BaseProvider):
         headers.update(self.extra_headers)
         return headers
 
+    def default_tool_calling(self) -> dict[str, Any]:
+        """OpenAI-compatible providers support automatic, parallel tool calls."""
+
+        return {
+            "tool_choice": "auto",
+            "parallel_tool_calls": True,
+        }
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -46,7 +54,7 @@ class OpenAICompatibleProvider(BaseProvider):
         tools: list[dict[str, Any]] | None = None,
         tool_calling: dict[str, Any] | None = None,
     ) -> ProviderResponse:
-        tool_calling = tool_calling or {}
+        tool_calling = {**self.default_tool_calling(), **(tool_calling or {})}
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
@@ -104,7 +112,7 @@ class OpenAICompatibleProvider(BaseProvider):
         tools: list[dict[str, Any]] | None = None,
         tool_calling: dict[str, Any] | None = None,
     ) -> AsyncIterator[str]:
-        tool_calling = tool_calling or {}
+        tool_calling = {**self.default_tool_calling(), **(tool_calling or {})}
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
