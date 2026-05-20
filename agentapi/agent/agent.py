@@ -310,7 +310,7 @@ class Agent:
                 "content": output,
             }
 
-        if self.tool_calling.get("parallel_tool_calls"):
+        if self.tool_calling.get("parallel_tool_calls") and self._get_provider().supports_parallel_tool_calls:
             tool_messages = await asyncio.gather(*(run_tool_call(call) for call in calls))
         else:
             tool_messages = [await run_tool_call(call) for call in calls]

@@ -14,6 +14,8 @@ from agentapi.providers.base import BaseProvider, ProviderResponse, ToolCall
 class OpenAICompatibleProvider(BaseProvider):
     """Minimal async provider for /chat/completions compatible APIs."""
 
+    supports_parallel_tool_calls = True
+
     def __init__(
         self,
         *,
