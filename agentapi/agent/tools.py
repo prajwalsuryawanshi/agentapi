@@ -190,9 +190,15 @@ def parse_tool_args(args_json: Any) -> dict[str, Any]:
     if not args_json.strip():
         return {}
     try:
-        return json.loads(args_json)
+        parsed = json.loads(args_json)
     except json.JSONDecodeError as exc:
         raise AgentProviderError(
             f"Failed to parse tool arguments as JSON: {exc}. Raw input: {args_json[:200]!r}",
             status_code=422,
         ) from exc
+    if not isinstance(parsed, Mapping):
+        raise AgentProviderError(
+            f"Tool arguments JSON must decode to an object, got {type(parsed).__name__}",
+            status_code=422,
+        )
+    return dict(parsed)
