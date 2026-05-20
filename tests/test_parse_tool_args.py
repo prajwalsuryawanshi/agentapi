@@ -25,5 +25,7 @@ def test_parse_tool_args_rejects_unsupported_non_string_inputs():
     ("null", "NoneType"),
 ])
 def test_parse_tool_args_rejects_json_strings_that_decode_to_non_objects(args_json, expected_type):
-    with pytest.raises(AgentProviderError, match=expected_type):
+    with pytest.raises(AgentProviderError, match=expected_type) as exc_info:
         parse_tool_args(args_json)
+
+    assert exc_info.value.status_code == 422
