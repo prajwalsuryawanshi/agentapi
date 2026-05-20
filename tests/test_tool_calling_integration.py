@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, ClassVar
 
 import pytest
 
@@ -62,7 +62,7 @@ class FakeHTTPResponse:
 
 
 class FakeAsyncClient:
-    requests: list[dict[str, Any]] = []
+    requests: ClassVar[list[dict[str, Any]]] = []
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         return None
