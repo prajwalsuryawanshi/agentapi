@@ -20,6 +20,7 @@ Agent(
     model: str | None = None,
     tools: list[Callable[..., Any]] | None = None,
     tool_calling: dict[str, Any] | None = None,
+    event_handler: Callable[[dict[str, Any]], Any] | None = None,
 )
 ```
 
@@ -35,6 +36,39 @@ Notes:
 
 - `run` is the best default for tool-centric workflows.
 - `stream` is for incremental output over SSE.
+- `event_handler` is optional and receives structured metadata-only lifecycle events.
+
+### Structured events
+
+Pass an `event_handler` when you want to connect AgentAPI to your own logger, metrics client, or tracing adapter:
+
+```python
+import logging
+from agentapi import Agent
+
+logger = logging.getLogger("agentapi.events")
+
+
+def log_agent_event(event: dict) -> None:
+    logger.info("agent event", extra={"agentapi_event": event})
+
+
+agent = Agent(
+    system_prompt="You are a helpful assistant",
+    provider="openai",
+    event_handler=log_agent_event,
+)
+```
+
+The callback can be synchronous or async. AgentAPI emits events such as:
+
+- `provider_call_start`
+- `provider_call_end`
+- `tool_execution_start`
+- `tool_execution_end`
+- `error`
+
+Events include safe metadata like provider name, model name, tool name, duration, token count, and output length. They intentionally do not include prompts, tool arguments, provider payloads, API keys, or raw response content.
 
 ## `AgentAPI`
 
