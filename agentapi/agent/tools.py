@@ -181,6 +181,11 @@ def parse_tool_args(args_json: str) -> dict[str, Any]:
         return {}
 
     try:
-        return json.loads(args_json)
+        args = json.loads(args_json)
     except json.JSONDecodeError as exc:
         raise ValueError("Invalid tool arguments: malformed JSON") from exc
+
+    if not isinstance(args, dict):
+        raise ValueError("Invalid tool arguments: expected a JSON object")
+
+    return args
