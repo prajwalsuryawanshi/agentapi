@@ -2,27 +2,27 @@
 
 Providers are the intelligence layer behind AgentAPI. They handle communication with Large Language Models (LLMs), manage tool-calling behavior, and process conversational context through a unified interface.
 
-AgentAPI is designed with a flexible provider architecture, allowing you to switch between built-in providers or implement custom providers depending on your workflow and infrastructure needs.
+AgentAPI is designed with a flexible provider architecture, allowing you to switch between built-in providers or implement fully custom providers depending on your workflow and infrastructure requirements.
 
 ---
 
-## Built-in Providers
+# Built-in Providers
 
 AgentAPI includes support for multiple providers out of the box.
 
-| Provider     | Description                                                     | Default Model      |
-| ------------ | --------------------------------------------------------------- | ------------------ |
-| `openai`     | Optimized for general-purpose reasoning, chat, and tool calling | `gpt-4o-mini`      |
-| `gemini`     | Google's Gemini models with native function-calling support     | `gemini-2.5-flash` |
-| `openrouter` | Access OpenAI-compatible models through OpenRouter              | `gpt-4o-mini`      |
+| Provider     | Description                                                               | Default Model      |
+| ------------ | ------------------------------------------------------------------------- | ------------------ |
+| `openai`     | Optimized for reasoning, tool calling, and general-purpose chat workflows | `gpt-4o-mini`      |
+| `gemini`     | Google's Gemini models with native function-calling support               | `gemini-2.5-flash` |
+| `openrouter` | Access OpenAI-compatible models through OpenRouter                        | `gpt-4o-mini`      |
 
 ---
 
-## Selecting a Provider
+# Selecting a Provider
 
-You can select a provider directly when creating an `Agent`.
+You can configure a provider directly when creating an `Agent`.
 
-```python
+```python id="21lmz5"
 from agentapi import Agent
 
 agent = Agent(
@@ -31,35 +31,79 @@ agent = Agent(
 )
 ```
 
-If no provider is specified, AgentAPI automatically falls back to the `DEFAULT_PROVIDER` environment variable.
+If no provider is specified, AgentAPI automatically uses the `DEFAULT_PROVIDER` environment variable.
 
 ---
 
-## Provider Configuration
+# Agent Provider Configuration
+
+The `Agent` class accepts provider-related configuration parameters.
+
+```python id="g2gw9w"
+from agentapi import Agent
+
+agent = Agent(
+    system_prompt="You are helpful",
+    provider="openai",
+    model="gpt-4o",
+)
+```
+
+## Parameters
+
+| Parameter       | Type                 | Description                                                               |
+| --------------- | -------------------- | ------------------------------------------------------------------------- |
+| `system_prompt` | `str`                | Global instructions guiding model behavior                                |
+| `provider`      | `str`                | Provider name (`openai`, `gemini`, `openrouter`, or custom provider name) |
+| `model`         | `str \| None`        | Optional model override                                                   |
+| `tools`         | `list \| None`       | List of registered tools available to the agent                           |
+| `memory`        | `BaseMemory \| None` | Conversation memory backend                                               |
+
+---
+
+# Provider Configuration
 
 Configure provider API keys using environment variables.
 
-### OpenAI
+## OpenAI
 
-```bash
+```bash id="h5p74r"
 OPENAI_API_KEY=your_api_key_here
 ```
 
-### Gemini
+## Gemini
 
-```bash
+```bash id="i5itx2"
 GEMINI_API_KEY=your_api_key_here
 ```
 
-### OpenRouter
+## OpenRouter
 
-```bash
+```bash id="4y4my6"
 OPENROUTER_API_KEY=your_api_key_here
 ```
 
-You can also explicitly override the default model:
+You can also configure a default provider globally:
 
-```python
+```bash id="4mrh0r"
+DEFAULT_PROVIDER=openai
+```
+
+---
+
+# Default Models
+
+AgentAPI automatically assigns default models for built-in providers.
+
+| Provider     | Default Model      |
+| ------------ | ------------------ |
+| `openai`     | `gpt-4o-mini`      |
+| `gemini`     | `gemini-2.5-flash` |
+| `openrouter` | `gpt-4o-mini`      |
+
+You can override the default model explicitly:
+
+```python id="ypgxq1"
 agent = Agent(
     system_prompt="You are helpful",
     provider="openai",
@@ -69,93 +113,157 @@ agent = Agent(
 
 ---
 
-## Provider-specific Tool Calling Defaults
+# Provider-specific Tool Calling Defaults
 
-AgentAPI automatically applies provider-aware defaults for tool-calling behavior.
+AgentAPI automatically applies provider-aware defaults internally.
 
-### OpenAI-compatible Providers
+## OpenAI-compatible Providers
 
-```python
+```python id="fr8l6n"
 tool_choice = "auto"
 parallel_tool_calls = True
 ```
 
-### Gemini
+## Gemini
 
-```python
+```python id="k4zd04"
 mode = "AUTO"
 ```
 
-You can override these defaults using the `tool_calling=` parameter when needed.
+You can override these defaults using the `tool_calling=` parameter.
 
 ---
 
-## Custom Providers
+# BaseProvider
 
-AgentAPI supports fully custom providers through the `BaseProvider` interface.
+Custom providers must inherit from the abstract `BaseProvider` class.
 
-This allows you to:
-
-* integrate internal LLM infrastructure
-* connect private APIs
-* use self-hosted models
-* customize orchestration behavior
-
----
-
-## The BaseProvider Interface
-
-All custom providers should inherit from the abstract `BaseProvider` class.
-
-```python
-async def generate_response(
-    self,
-    prompt: str,
-    system_prompt: str,
-) -> str:
-    """
-    Generate a response from the LLM.
-
-    Args:
-        prompt (str):
-            The primary user input or query.
-
-        system_prompt (str):
-            Instructions guiding model behavior.
-
-    Returns:
-        str:
-            The generated model response.
-    """
-    pass
+```python id="4s6qcu"
+from agentapi import BaseProvider
 ```
 
+The `BaseProvider` interface defines the methods required for all providers.
+
 ---
 
-## Example: Custom HTTP Provider
+# BaseProvider Methods
 
-Below is a practical example of implementing a provider using a custom HTTP endpoint.
+## chat()
 
-```python
+Used for standard non-streaming responses.
+
+```python id="s8fgin"
+async def chat(
+    self,
+    messages: list[dict[str, Any]],
+    *,
+    tools: list[dict[str, Any]] | None = None,
+    tool_calling: dict[str, Any] | None = None,
+) -> ProviderResponse:
+```
+
+### Parameters
+
+| Parameter      | Type                           | Description                                  |
+| -------------- | ------------------------------ | -------------------------------------------- |
+| `messages`     | `list[dict[str, Any]]`         | Conversation message history                 |
+| `tools`        | `list[dict[str, Any]] \| None` | Tool definitions available to the provider   |
+| `tool_calling` | `dict[str, Any] \| None`       | Provider-specific tool-calling configuration |
+
+### Returns
+
+Returns a `ProviderResponse` object containing:
+
+* generated content
+* tool calls
+* raw provider response data
+
+---
+
+## stream()
+
+Used for streaming incremental responses.
+
+```python id="iqmxql"
+async def stream(
+    self,
+    messages: list[dict[str, Any]],
+    *,
+    tools: list[dict[str, Any]] | None = None,
+    tool_calling: dict[str, Any] | None = None,
+) -> AsyncIterator[str]:
+```
+
+### Parameters
+
+| Parameter      | Type                           | Description                                  |
+| -------------- | ------------------------------ | -------------------------------------------- |
+| `messages`     | `list[dict[str, Any]]`         | Conversation message history                 |
+| `tools`        | `list[dict[str, Any]] \| None` | Tool definitions available to the provider   |
+| `tool_calling` | `dict[str, Any] \| None`       | Provider-specific tool-calling configuration |
+
+### Yields
+
+Streaming text chunks incrementally as they are generated by the provider.
+
+---
+
+# ProviderResponse
+
+Providers return a `ProviderResponse` object from the `chat()` method.
+
+```python id="d27m5t"
+ProviderResponse(
+    content="hello",
+    tool_calls=[],
+    raw_message={},
+)
+```
+
+## Fields
+
+| Field         | Type   | Description                            |
+| ------------- | ------ | -------------------------------------- |
+| `content`     | `str`  | Generated response text                |
+| `tool_calls`  | `list` | Tool calls returned by the provider    |
+| `raw_message` | `dict` | Raw provider-specific response payload |
+
+---
+
+# Custom Providers
+
+AgentAPI supports fully custom providers for:
+
+* private APIs
+* self-hosted models
+* internal infrastructure
+* experimental orchestration layers
+
+---
+
+# Example: Custom HTTP Provider
+
+Below is a practical example of implementing a custom provider using a custom HTTP endpoint.
+
+```python id="om5tx3"
 import aiohttp
 
-from agentapi.providers.base import BaseProvider
+from agentapi.providers.base import BaseProvider, ProviderResponse
 
 
 class MyCustomProvider(BaseProvider):
-    """
-    A custom provider communicating with a private LLM endpoint.
-    """
 
     def __init__(self, api_url: str, api_key: str):
         self.api_url = api_url
         self.api_key = api_key
 
-    async def generate_response(
+    async def chat(
         self,
-        prompt: str,
-        system_prompt: str,
-    ) -> str:
+        messages,
+        *,
+        tools=None,
+        tool_calling=None,
+    ) -> ProviderResponse:
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -163,16 +271,8 @@ class MyCustomProvider(BaseProvider):
         }
 
         payload = {
-            "messages": [
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ]
+            "messages": messages,
+            "tools": tools,
         }
 
         async with aiohttp.ClientSession() as session:
@@ -186,16 +286,37 @@ class MyCustomProvider(BaseProvider):
 
                 data = await response.json()
 
-                return data["choices"][0]["message"]["content"]
+                return ProviderResponse(
+                    content=data["choices"][0]["message"]["content"],
+                    tool_calls=[],
+                    raw_message=data,
+                )
+
+    async def stream(
+        self,
+        messages,
+        *,
+        tools=None,
+        tool_calling=None,
+    ):
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                self.api_url,
+                json={"messages": messages},
+            ) as response:
+
+                async for chunk in response.content:
+                    yield chunk.decode()
 ```
 
 ---
 
-## Registering a Custom Provider
+# Registering a Custom Provider
 
 Once your provider is implemented, register it using `Agent.register_provider()`.
 
-```python
+```python id="jlwmrg"
 from agentapi import Agent
 
 Agent.register_provider(
@@ -209,9 +330,18 @@ Agent.register_provider(
 
 Then use it like any built-in provider:
 
-```python
+```python id="tjlwmq"
 agent = Agent(
     system_prompt="You are helpful",
     provider="myprovider",
 )
 ```
+
+---
+
+# Developer Notes
+
+* Provider implementations can internally manage retries, headers, authentication, and request formatting.
+* Tool-calling behavior differs slightly across providers. AgentAPI applies sensible defaults automatically.
+* Streaming providers should yield incremental text chunks for SSE compatibility.
+* Custom providers can integrate with any REST API, local model runtime, or orchestration system.
