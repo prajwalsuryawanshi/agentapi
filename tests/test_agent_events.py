@@ -100,7 +100,7 @@ def test_agent_run_emits_provider_and_tool_events_without_payloads() -> None:
     assert all("arguments" not in event for event in events)
 
 
-def test_stream_generator_emits_streaming_metrics() -> None:
+def test_stream_response_emits_streaming_metrics() -> None:
     events: list[dict[str, Any]] = []
     agent = Agent(
         system_prompt="You are helpful.",
@@ -109,11 +109,12 @@ def test_stream_generator_emits_streaming_metrics() -> None:
     )
 
     async def collect() -> list[str]:
-        return [token async for token in agent._stream_generator("Say hello")]
+        response = agent.stream("Say hello")
+        return [chunk async for chunk in response.body_iterator]
 
-    tokens = asyncio.run(collect())
+    chunks = asyncio.run(collect())
 
-    assert tokens == ["hello", " world"]
+    assert "".join(chunks) == "data: hello\n\ndata:  world\n\n"
     assert [event["event"] for event in events] == [
         "provider_call_start",
         "provider_call_end",
@@ -135,3 +136,27 @@ def test_event_handler_errors_do_not_break_agent_run() -> None:
     )
 
     assert asyncio.run(agent.run("Where is A-42?")) == "Order A-42 is shipped"
+
+
+def test_async_event_handler_is_supported() -> None:
+    events: list[dict[str, Any]] = []
+
+    async def async_handler(event: dict[str, Any]) -> None:
+        events.append(event)
+
+    agent = Agent(
+        system_prompt="You are helpful.",
+        provider=ToolLoopProvider(),
+        tools=[lookup_order],
+        event_handler=async_handler,
+    )
+
+    assert asyncio.run(agent.run("Where is A-42?")) == "Order A-42 is shipped"
+    assert [event["event"] for event in events] == [
+        "provider_call_start",
+        "provider_call_end",
+        "tool_execution_start",
+        "tool_execution_end",
+        "provider_call_start",
+        "provider_call_end",
+    ]

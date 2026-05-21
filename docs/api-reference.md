@@ -68,6 +68,8 @@ The callback can be synchronous or async. AgentAPI emits events such as:
 - `tool_execution_end`
 - `error`
 
+Streaming metrics use the same `provider_call_start` and `provider_call_end` event names with `mode="stream"`. The final streaming `provider_call_end` event includes stream-specific metadata such as `token_count` and `content_length`.
+
 Events include safe metadata like provider name, model name, tool name, duration, token count, and output length. They intentionally do not include prompts, tool arguments, provider payloads, API keys, or raw response content.
 
 ## `AgentAPI`
