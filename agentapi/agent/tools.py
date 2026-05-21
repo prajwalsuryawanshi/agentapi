@@ -174,11 +174,13 @@ def to_tool_definition(func: Callable[..., Any]) -> ToolDefinition:
         func=func,
         schema=schema,
     )
-
-
 def parse_tool_args(args_json: str) -> dict[str, Any]:
     """Parse model tool arguments safely."""
 
     if not args_json.strip():
         return {}
-    return json.loads(args_json)
+
+    try:
+        return json.loads(args_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Invalid tool arguments: malformed JSON") from exc
