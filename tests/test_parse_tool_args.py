@@ -20,6 +20,14 @@ def test_parse_tool_args_accepts_provider_native_mapping() -> None:
     assert parsed is not raw_args
 
 
+def test_parse_tool_args_rejects_mapping_with_non_string_keys() -> None:
+    with pytest.raises(AgentProviderError) as exc_info:
+        parse_tool_args({1: "Delhi"})
+
+    assert exc_info.value.status_code == 422
+    assert "mapping keys must be strings" in str(exc_info.value)
+
+
 def test_parse_tool_args_treats_missing_args_as_empty() -> None:
     assert parse_tool_args(None) == {}
     assert parse_tool_args("") == {}

@@ -181,7 +181,13 @@ def parse_tool_args(args_json: Any) -> dict[str, Any]:
     if args_json is None:
         return {}
     if isinstance(args_json, Mapping):
-        return dict(args_json)
+        parsed_mapping = dict(args_json)
+        if any(not isinstance(key, str) for key in parsed_mapping):
+            raise AgentProviderError(
+                "Tool argument mapping keys must be strings",
+                status_code=422,
+            )
+        return parsed_mapping
     if not isinstance(args_json, str):
         raise AgentProviderError(
             f"Tool arguments must be a JSON object string or mapping, got {type(args_json).__name__}",
