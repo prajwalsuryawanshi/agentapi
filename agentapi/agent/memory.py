@@ -33,10 +33,11 @@ class MemoryBackend(ABC):
 
 
 class InMemoryMemory(MemoryBackend):
-    """Stores chat messages in process memory with per-conversation isolation.
+    """Stores chat messages in process memory.
 
-    Supports multiple conversations keyed by UUID. Ideal for development and
-    testing multi-user scenarios without external dependencies.
+    Each instance maintains its own isolated message list. Two instances
+    with the same conversation_id do NOT share state — use RedisMemory
+    for shared state across instances or workers.
     """
 
     def __init__(
@@ -49,23 +50,18 @@ class InMemoryMemory(MemoryBackend):
         else:
             self.conversation_id = create_conversation_id()
 
-        # Per-conversation message storage and system prompts.
-        self._conversations: dict[str, list[dict[str, Any]]] = {}
+        self._messages: list[dict[str, Any]] = []
 
-        # Initialize this conversation.
-        self._conversations[self.conversation_id] = []
 
     @property
     def messages(self) -> list[dict[str, Any]]:
-        return self._conversations.get(self.conversation_id, [])
+        return self._messages
 
     def add(self, message: dict[str, Any]) -> None:
-        if self.conversation_id not in self._conversations:
-            self._conversations[self.conversation_id] = []
-        self._conversations[self.conversation_id].append(message)
+        self._messages.append(message)
 
     def reset(self) -> None:
-        self._conversations[self.conversation_id] = []
+        self._messages = []
 
 
 class RedisMemory(MemoryBackend):
