@@ -230,11 +230,9 @@ class Agent:
             )
         if self.provider_name == "anthropic":
             from agentapi.providers.anthropic import AnthropicProvider
-            import os
-            # Use getattr to safely check settings, fallback to os env if settings doesn't have it yet
-            api_key = getattr(settings, "anthropic_api_key", os.getenv("ANTHROPIC_API_KEY"))
+
             return AnthropicProvider(
-                api_key=self._require_api_key(api_key, "ANTHROPIC_API_KEY"),
+                api_key=self._require_api_key(settings.anthropic_api_key, "ANTHROPIC_API_KEY"),
                 model=self.model,
             )
         raise ValueError(
