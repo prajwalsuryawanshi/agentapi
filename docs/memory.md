@@ -20,6 +20,7 @@ Use this when you want the simplest setup:
 - no external service required
 - fast local iteration
 - session isolation through `conversation_id`
+- optional idle cleanup through `conversation_ttl_seconds`
 
 Example:
 
@@ -30,6 +31,7 @@ conversation_id = create_conversation_id()
 
 memory = InMemoryMemory(
     conversation_id=conversation_id,
+    conversation_ttl_seconds=3600,
 )
 
 agent = Agent(
@@ -39,6 +41,8 @@ agent = Agent(
 )
 ```
 
+When `conversation_ttl_seconds` is set, `InMemoryMemory` clears an idle conversation the next time it is read from or written to after the TTL has elapsed. Leave it unset to keep the previous behavior where messages stay available for the lifetime of the memory object.
+
 ### `RedisMemory`
 
 Use this when you need persistence across workers or servers:
@@ -46,6 +50,7 @@ Use this when you need persistence across workers or servers:
 - shared state across multiple processes
 - better for production deployments
 - optional metadata like `user_id` and `tenant_id`
+- optional Redis key expiry through `ttl_seconds`
 
 Example:
 
@@ -57,6 +62,7 @@ memory = RedisMemory(
     conversation_id=create_conversation_id(),
     user_id="123",
     tenant_id="acme",
+    ttl_seconds=3600,
 )
 
 agent = Agent(

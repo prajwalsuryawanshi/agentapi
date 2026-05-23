@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import math
+import time
 from importlib import import_module
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Callable
 from uuid import UUID, uuid4
 
 
@@ -42,30 +44,67 @@ class InMemoryMemory(MemoryBackend):
     def __init__(
         self,
         conversation_id: str | None = None,
+        conversation_ttl_seconds: float | None = None,
+        *,
+        time_fn: Callable[[], float] = time.monotonic,
     ) -> None:
+        if conversation_ttl_seconds is not None and (
+            isinstance(conversation_ttl_seconds, bool)
+            or not isinstance(conversation_ttl_seconds, (int, float))
+            or not math.isfinite(conversation_ttl_seconds)
+            or conversation_ttl_seconds <= 0
+        ):
+            raise ValueError("conversation_ttl_seconds must be a positive finite number or None")
+
         # Validate and normalize to canonical UUID string if provided; auto-generate otherwise.
         if conversation_id is not None:
             self.conversation_id = str(UUID(conversation_id))
         else:
             self.conversation_id = create_conversation_id()
 
+        self._conversation_ttl_seconds = conversation_ttl_seconds
+        self._time_fn = time_fn
+
         # Per-conversation message storage and system prompts.
         self._conversations: dict[str, list[dict[str, Any]]] = {}
+        self._last_accessed_at: dict[str, float] = {}
 
         # Initialize this conversation.
         self._conversations[self.conversation_id] = []
+        self._touch(self.conversation_id)
 
     @property
     def messages(self) -> list[dict[str, Any]]:
+        self._expire_if_needed(self.conversation_id)
+        self._touch(self.conversation_id)
         return self._conversations.get(self.conversation_id, [])
 
     def add(self, message: dict[str, Any]) -> None:
+        self._expire_if_needed(self.conversation_id)
         if self.conversation_id not in self._conversations:
             self._conversations[self.conversation_id] = []
         self._conversations[self.conversation_id].append(message)
+        self._touch(self.conversation_id)
 
     def reset(self) -> None:
         self._conversations[self.conversation_id] = []
+        self._touch(self.conversation_id)
+
+    def _touch(self, conversation_id: str) -> None:
+        self._last_accessed_at[conversation_id] = self._time_fn()
+
+    def _expire_if_needed(self, conversation_id: str) -> None:
+        if self._conversation_ttl_seconds is None:
+            return
+
+        last_accessed_at = self._last_accessed_at.get(conversation_id)
+        if last_accessed_at is None:
+            self._touch(conversation_id)
+            return
+
+        if self._time_fn() - last_accessed_at >= self._conversation_ttl_seconds:
+            self._conversations[conversation_id] = []
+            self._touch(conversation_id)
 
 
 class RedisMemory(MemoryBackend):
