@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 import logging
-from typing import Any, AsyncIterator, Callable
+from typing import Any, AsyncIterator, Callable, Union
 
 from fastapi.responses import StreamingResponse
 
@@ -20,6 +20,8 @@ from agentapi.providers.openrouter import OpenRouterProvider
 logger = logging.getLogger(__name__)
 
 ProviderFactory = Callable[["Agent", Any, str], BaseProvider]
+ToolAuthorizationResult = Union[bool, str]
+ToolAuthorizer = Callable[[ToolCall], ToolAuthorizationResult]
 
 
 class AgentAPIUsageError(Exception):
@@ -49,6 +51,7 @@ class Agent:
         model: str | None = None,
         tools: list[Callable[..., Any]] | None = None,
         tool_calling: dict[str, Any] | None = None,
+        authorize_tool: ToolAuthorizer | None = None,
     ) -> None:
         settings = get_settings()
 
@@ -62,6 +65,7 @@ class Agent:
         self.tool_calling = self._default_tool_calling_for(self.provider_name)
         if tool_calling:
             self.tool_calling.update(tool_calling)
+        self.authorize_tool = authorize_tool
         self.memory = memory or InMemoryMemory()
 
         self._settings = settings
@@ -296,6 +300,23 @@ class Agent:
                 )
                 continue
 
+            authorization = self._authorize_tool_call(call)
+            if authorization is not True:
+                output = (
+                    authorization
+                    if isinstance(authorization, str)
+                    else f"Tool call '{call.name}' was denied by authorize_tool."
+                )
+                conversation_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.id,
+                        "name": call.name,
+                        "content": output,
+                    }
+                )
+                continue
+
             try:
                 args = parse_tool_args(call.arguments)
                 result = tool_def.func(**args)
@@ -313,3 +334,8 @@ class Agent:
                     "content": output,
                 }
             )
+
+    def _authorize_tool_call(self, call: ToolCall) -> ToolAuthorizationResult:
+        if self.authorize_tool is None:
+            return True
+        return self.authorize_tool(call)
