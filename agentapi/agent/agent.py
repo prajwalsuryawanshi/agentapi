@@ -16,6 +16,9 @@ from agentapi.providers.base import BaseProvider, ToolCall
 from agentapi.providers.gemini import GeminiProvider
 from agentapi.providers.openai import OpenAIProvider
 from agentapi.providers.openrouter import OpenRouterProvider
+from langchain_community.vectorstores import FAISS
+from langchain_huggingface.embeddings import HuggingFaceEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +70,9 @@ class Agent:
         self._settings = settings
         self._provider: BaseProvider | None = provider if isinstance(provider, BaseProvider) else None
         self._tools: dict[str, ToolDefinition] = {}
+        self._vectorstore = None
+        self._embeddings = None
+        self._embedding_model_name = None
 
         for func in tools or []:
             self.add_tool(func)
@@ -75,6 +81,81 @@ class Agent:
         """Register a callable tool on the agent."""
         definition = to_tool_definition(func)
         self._tools[definition.name] = definition
+
+    def add_knowledge(
+        self,
+        texts: list[str],
+        *,
+        chunk_size: int = 500,
+        chunk_overlap: int = 50,
+        embedding_model: str = "all-MiniLM-L6-v2",
+    ) -> None:
+        """Index plain-text knowledge into a FAISS vector store for RAG.
+
+        Args:
+            texts: List of raw text strings to embed and store.
+            chunk_size: Size of each text chunk.
+            chunk_overlap: Overlap between consecutive chunks.
+            embedding_model: HuggingFace sentence-transformer model name.
+        """
+        if not texts:
+            raise ValueError("texts must be a non-empty list of strings.")
+
+        if self._embedding_model_name is not None and embedding_model != self._embedding_model_name:
+            raise ValueError(
+                f"Cannot mix embedding models: knowledge base uses "
+                f"'{self._embedding_model_name}', but '{embedding_model}' was requested. "
+                f"Create a new Agent instance to use a different model."
+            )
+
+        try:
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+            )
+            chunks = splitter.create_documents(texts)
+
+            if not chunks:
+                raise ValueError("Text chunking produced no documents. Check chunk_size and input texts.")
+
+            if self._embeddings is None:
+                self._embeddings = HuggingFaceEmbeddings(model_name=embedding_model)
+                self._embedding_model_name = embedding_model
+
+            if self._vectorstore is not None:
+                self._vectorstore.add_documents(chunks)
+            else:
+                self._vectorstore = FAISS.from_documents(chunks, self._embeddings)
+
+        except ValueError:
+            raise
+        except Exception as e:
+            raise RuntimeError(f"Failed to add knowledge to vector store: {e}") from e
+
+    def query_knowledge(self, query: str, *, k: int = 3) -> list[str]:
+        """Retrieve top-k relevant chunks from the knowledge base.
+
+        Args:
+            query: The search query string.
+            k: Number of top results to return.
+
+        Returns:
+            List of matching text chunks.
+        """
+        if self._vectorstore is None:
+            return []
+
+        if not query or not query.strip():
+            raise ValueError("query must be a non-empty string.")
+
+        if k <= 0:
+            raise ValueError("k must be a positive integer.")
+
+        try:
+            docs = self._vectorstore.similarity_search(query, k=k)
+            return [doc.page_content for doc in docs]
+        except Exception as e:
+            raise RuntimeError(f"Failed to query knowledge base: {e}") from e
 
     def reset_memory(self) -> None:
         """Clear conversation state but preserve the agent system prompt."""
