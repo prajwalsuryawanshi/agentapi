@@ -164,6 +164,36 @@ Example:
 async def stream_chat(message: str):
     return agent.stream(message)
 ```
+### Configuring SSE for proxies
+
+If you put AgentAPI behind nginx, Cloudflare, or any other reverse proxy, long streams can get cut off — most proxies kill idle connections after 30–60 seconds. To handle this, you can tune two streaming options:
+
+```python
+app = AgentAPI(
+    sse_chunk_size=1024,        # how much text per `data:` event (default: 64)
+    sse_heartbeat_seconds=15,   # send a keepalive every N seconds (default: off)
+)
+```
+
+Both default to the old behavior, so adding these won't break anything if you were already using AgentAPI.
+
+When `sse_heartbeat_seconds` is set, AgentAPI sends `: keepalive\n\n` during quiet periods. It's a valid SSE comment — clients ignore it, but proxies see traffic on the wire and leave the connection alone.
+
+A typical nginx config that plays well with SSE:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Connection '';
+    proxy_buffering off;
+    proxy_cache off;
+    chunked_transfer_encoding off;
+    proxy_read_timeout 1h;
+}
+```
+
+The key bits are `proxy_buffering off` (so events aren't held back) and a long `proxy_read_timeout` paired with the heartbeat above.
 
 ## CLI
 
