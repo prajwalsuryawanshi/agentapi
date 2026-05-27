@@ -1,13 +1,13 @@
 """Tool registration and JSON schema generation."""
 
 from __future__ import annotations
-
 import inspect
 import json
 import types
 from dataclasses import dataclass
 from typing import Any, get_args, get_origin
 from collections.abc import Callable
+from agentapi.errors import AgentProviderError
 
 @dataclass
 class ToolDefinition:
@@ -88,7 +88,7 @@ def _build_openai_tool_schema(
     properties: dict[str, Any] = {}
     required: list[str] = []
 
-    for name, param in signature.parameters.items():
+    for param_name, param in signature.parameters.items():
         annotation = param.annotation
         if annotation is inspect._empty:
             annotation = str
@@ -97,13 +97,13 @@ def _build_openai_tool_schema(
         if param.default is not inspect._empty and not isinstance(param_type, list):
             param_type = [param_type, "null"]
 
-        properties[name] = {
+        properties[param_name] = {
             "type": param_type,
-            "description": f"Parameter: {name}",
+            "description": f"Parameter: {param_name}",
         }
 
         # Strict mode expects required to include all declared properties.
-        required.append(name)
+        required.append(param_name)
 
     return {
         "type": "function",
@@ -168,7 +168,7 @@ def to_tool_definition(func: Callable[..., Any]) -> ToolDefinition:
     context = getattr(func, "__agentapi_tool_context__", None) or ""
 
     return ToolDefinition(
-        name=getattr(func, "__agentapi_tool_name__", func.__name__),
+        name=func.__name__,
         description=description,
         context=context,
         func=func,
@@ -178,7 +178,12 @@ def to_tool_definition(func: Callable[..., Any]) -> ToolDefinition:
 
 def parse_tool_args(args_json: str) -> dict[str, Any]:
     """Parse model tool arguments safely."""
-
     if not args_json.strip():
         return {}
-    return json.loads(args_json)
+    try:
+        return json.loads(args_json)
+    except json.JSONDecodeError as exc:
+        raise AgentProviderError(
+            f"Failed to parse tool arguments as JSON: {exc}. Raw input: {args_json[:200]!r}",
+            status_code=422,
+        ) from exc

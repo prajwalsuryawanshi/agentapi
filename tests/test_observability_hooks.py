@@ -8,6 +8,7 @@ from typing import Any, AsyncIterator
 import pytest
 
 from agentapi import Agent, BaseProvider, tool
+from agentapi.agent.agent import AgentAPIProviderError
 from agentapi.agent.observability import emit_event
 from agentapi.providers.base import ProviderResponse, ToolCall
 
@@ -162,7 +163,7 @@ def test_provider_errors_emit_structured_error_event() -> None:
         event_hooks=[events.append],
     )
 
-    with pytest.raises(RuntimeError, match="provider unavailable"):
+    with pytest.raises(AgentAPIProviderError, match="provider unavailable"):
         asyncio.run(agent.run("hello"))
 
     assert [event["event"] for event in events] == ["provider.chat.start", "provider.chat.error"]
@@ -180,11 +181,12 @@ def test_stream_emits_latency_and_token_counts() -> None:
 
     async def collect_stream() -> str:
         chunks = []
-        async for token in agent.stream("hello"):
+        response = agent.stream("hello")
+        async for token in response.body_iterator:
             chunks.append(token)
         return "".join(chunks)
 
-    assert asyncio.run(collect_stream()) == "hello"
+    assert asyncio.run(collect_stream()) == "data: hel\n\ndata: lo\n\n"
     assert [event["event"] for event in events] == ["provider.stream.start", "provider.stream.end"]
     assert events[-1]["token_count"] == 2
     assert events[-1]["content_length"] == 5

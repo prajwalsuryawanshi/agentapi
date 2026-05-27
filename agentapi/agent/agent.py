@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import time
 from typing import Any, AsyncIterator, Callable
+
+from fastapi.responses import StreamingResponse
 
 from agentapi.agent.memory import InMemoryMemory, MemoryBackend
 from agentapi.agent.observability import AgentEventHook, build_event, emit_event
@@ -16,8 +19,22 @@ from agentapi.providers.gemini import GeminiProvider
 from agentapi.providers.openai import OpenAIProvider
 from agentapi.providers.openrouter import OpenRouterProvider
 
+logger = logging.getLogger(__name__)
 
 ProviderFactory = Callable[["Agent", Any, str], BaseProvider]
+
+
+class AgentAPIUsageError(Exception):
+    """Raised when the developer uses the AgentAPI incorrectly."""
+    pass
+
+
+class AgentAPIProviderError(Exception):
+    """Raised when an upstream LLM provider call fails."""
+
+    def __init__(self, message: str, original: Exception | None = None) -> None:
+        super().__init__(message)
+        self.original = original
 
 
 class Agent:
@@ -60,7 +77,6 @@ class Agent:
 
     def add_tool(self, func: Callable[..., Any]) -> None:
         """Register a callable tool on the agent."""
-
         definition = to_tool_definition(func)
         self._tools[definition.name] = definition
 
@@ -71,7 +87,6 @@ class Agent:
 
     def reset_memory(self) -> None:
         """Clear conversation state but preserve the agent system prompt."""
-
         self.memory.reset()
 
     def _conversation_messages(self, extra_messages: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
@@ -108,7 +123,6 @@ class Agent:
                         ],
                     }
                 )
-
                 await self._execute_tool_calls(response.tool_calls, conversation_messages)
                 continue
 
@@ -121,8 +135,40 @@ class Agent:
         self.memory.add({"role": "assistant", "content": fallback})
         return fallback
 
-    async def stream(self, message: str) -> AsyncIterator[str]:
-        """Stream model tokens and persist final assistant message."""
+    def stream(self, message: str) -> StreamingResponse:
+        """Stream model tokens as FastAPI StreamingResponse using SSE format.
+
+        Each token is split on newline boundaries and emitted as valid SSE
+        frames so multi-line payloads remain a single logical SSE event.
+        Provider errors are logged server-side and surfaced as a sanitized
+        ``data: [ERROR] ...\\n\\n`` event so the client never receives raw
+        exception text.
+
+        Examples::
+
+            # FastAPI endpoint
+            @app.post("/chat/stream")
+            async def chat_stream(message: str):
+                return agent.stream(message)
+
+            # Direct async iteration
+            async for chunk in agent.stream(message):
+                print(chunk, end="", flush=True)
+        """
+        async def _sse_generator() -> AsyncIterator[str]:
+            try:
+                async for token in self._stream_generator(message):
+                    for line in str(token).replace("\r", "").split("\n"):
+                        yield f"data: {line}\n"
+                    yield "\n"
+            except AgentAPIProviderError:
+                logger.exception("[AgentAPI] Streaming error surfaced in SSE generator.")
+                yield "data: [ERROR] Streaming failed. Check server logs for details.\n\n"
+
+        return StreamingResponse(_sse_generator(), media_type="text/event-stream")
+
+    async def _stream_generator(self, message: str) -> AsyncIterator[str]:
+        """Internal async generator that streams tokens from the provider."""
 
         conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
         provider = self._get_provider()
@@ -138,6 +184,15 @@ class Agent:
             ):
                 collected.append(token)
                 yield token
+        except AgentAPIProviderError:
+            await self._emit_event(
+                "provider.stream.error",
+                **self._provider_event_fields(conversation_messages),
+                duration_ms=round((time.perf_counter() - started) * 1000, 3),
+                error_type=AgentAPIProviderError.__name__,
+                token_count=len(collected),
+            )
+            raise
         except Exception as exc:
             await self._emit_event(
                 "provider.stream.error",
@@ -146,7 +201,13 @@ class Agent:
                 error_type=exc.__class__.__name__,
                 token_count=len(collected),
             )
-            raise
+            logger.exception(
+                "[AgentAPI] Streaming error. Check your provider configuration and API key."
+            )
+            raise AgentAPIProviderError(
+                f"Streaming failed: {exc}",
+                original=exc,
+            ) from exc
 
         full_text = "".join(collected)
         await self._emit_event(
@@ -182,15 +243,22 @@ class Agent:
                 api_key=self._require_api_key(settings.openrouter_api_key, "OPENROUTER_API_KEY"),
                 model=self.model,
             )
-
+        if self.provider_name == "anthropic":
+            from agentapi.providers.anthropic import AnthropicProvider
+            import os
+            # Use getattr to safely check settings, fallback to os env if settings doesn't have it yet
+            api_key = getattr(settings, "anthropic_api_key", os.getenv("ANTHROPIC_API_KEY"))
+            return AnthropicProvider(
+                api_key=self._require_api_key(api_key, "ANTHROPIC_API_KEY"),
+                model=self.model,
+            )
         raise ValueError(
-            "Unsupported provider. Use one of: openai, gemini, openrouter, or register a custom provider"
+            "Unsupported provider. Use one of: openai, gemini, openrouter, anthropic or register a custom provider"
         )
 
     @classmethod
     def register_provider(cls, name: str, factory: ProviderFactory) -> None:
         """Register a custom provider factory for Agent(provider=<name>)."""
-
         provider_name = name.strip().lower()
         if not provider_name:
             raise ValueError("Provider name cannot be empty")
@@ -204,7 +272,6 @@ class Agent:
     def _require_api_key(self, value: str | None, env_name: str) -> str:
         if value and value.strip():
             return value
-
         raise AgentConfigurationError(
             f"Missing API key for provider '{self.provider_name}'. "
             f"Set {env_name} in your environment or .env file."
@@ -213,15 +280,13 @@ class Agent:
     def _default_model_for(self, provider_name: str) -> str:
         if provider_name == "gemini":
             return "gemini-2.5-flash"
+        if provider_name == "anthropic":
+            return "claude-3-5-sonnet-20241022"
         return "gpt-4o-mini"
 
     def _default_tool_calling_for(self, provider_name: str) -> dict[str, Any]:
         if provider_name == "gemini":
-            return {
-                "mode": "AUTO",  # Gemini functionCallingConfig mode
-            }
-
-        # OpenAI-compatible defaults.
+            return {"mode": "AUTO"}
         return {
             "tool_choice": "auto",
             "parallel_tool_calls": True,
@@ -255,6 +320,14 @@ class Agent:
                 tools=self._tool_schemas(),
                 tool_calling=self.tool_calling,
             )
+        except AgentAPIProviderError:
+            await self._emit_event(
+                "provider.chat.error",
+                **self._provider_event_fields(messages),
+                duration_ms=round((time.perf_counter() - started) * 1000, 3),
+                error_type=AgentAPIProviderError.__name__,
+            )
+            raise
         except Exception as exc:
             await self._emit_event(
                 "provider.chat.error",
@@ -262,7 +335,13 @@ class Agent:
                 duration_ms=round((time.perf_counter() - started) * 1000, 3),
                 error_type=exc.__class__.__name__,
             )
-            raise
+            logger.exception(
+                "[AgentAPI] Provider error in run(). Check your API key and provider configuration."
+            )
+            raise AgentAPIProviderError(
+                f"Provider call failed: {exc}. Check your API key and provider configuration.",
+                original=exc,
+            ) from exc
 
         await self._emit_event(
             "provider.chat.end",

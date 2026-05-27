@@ -8,7 +8,7 @@ from typing import Any, AsyncIterator
 
 import httpx
 
-from agentapi.errors import AgentProviderError
+from agentapi.errors import AgentProviderError, AgentConfigurationError
 from agentapi.providers.base import BaseProvider, ProviderResponse, ToolCall
 
 
@@ -17,7 +17,7 @@ class GeminiProvider(BaseProvider):
 
     def __init__(self, *, api_key: str, model: str) -> None:
         if not api_key:
-            raise ValueError("API key is required for provider initialization")
+            raise AgentConfigurationError("Missing Gemini API key. Set GEMINI_API_KEY in your .env file.")
 
         self.api_key = api_key
         self.model = model

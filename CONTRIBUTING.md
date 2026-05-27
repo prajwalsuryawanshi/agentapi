@@ -10,10 +10,17 @@ Thanks for your interest in contributing to AgentAPI.
 
 ```bash
 python -m venv .venv
-.venv\\Scripts\\activate
+
+# Windows
+.venv\Scripts\activate
+
+# macOS/Linux
+source .venv/bin/activate
+
 pip install -U pip
 pip install -e .
 ```
+
 
 ## Local Run
 
