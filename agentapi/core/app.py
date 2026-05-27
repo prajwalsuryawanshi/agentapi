@@ -6,6 +6,7 @@ import inspect
 import asyncio
 import math
 import contextlib
+import re
 from functools import wraps
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable, TypeVar
@@ -27,6 +28,16 @@ from agentapi.errors import AgentProviderError
 F = TypeVar("F", bound=Callable[..., Any])
 
 
+_ERROR_REDACTION_REPLACEMENT = "[REDACTED]"
+_DEFAULT_ERROR_REDACTION_PATTERNS = (
+    r"sk-[A-Za-z0-9_-]{8,}",
+    r"gsk_[A-Za-z0-9_-]{8,}",
+    r"AIza[A-Za-z0-9_-]{8,}",
+    r"Bearer\s+[A-Za-z0-9._~+/=-]+",
+    r"https?://[^/\s:@]+:[^@\s/]+@",
+)
+
+
 class AgentAPI(FastAPI):
     """A small FastAPI extension with AgentAPI-focused decorators."""
 
@@ -35,6 +46,8 @@ class AgentAPI(FastAPI):
        *args: Any,
         sse_chunk_size: int = 64,
         sse_heartbeat_seconds: float | None = None,
+        error_redaction: bool = True,
+        error_redaction_patterns: list[str] | None = None,
        **kwargs: Any,
     ) -> None:
         if (
@@ -55,6 +68,14 @@ class AgentAPI(FastAPI):
 
         self._sse_chunk_size = sse_chunk_size
         self._sse_heartbeat_seconds = sse_heartbeat_seconds
+        self._error_redaction = error_redaction
+        self._error_redaction_patterns = tuple(
+            re.compile(pattern)
+            for pattern in (
+                _DEFAULT_ERROR_REDACTION_PATTERNS
+                + tuple(error_redaction_patterns or ())
+            )
+        )
 
         kwargs.setdefault("title", "AgentAPI")
         kwargs.setdefault("description", "AgentAPI application")
@@ -290,6 +311,14 @@ window.addEventListener('load', function () {
             result = await result
         return result
 
+    def _safe_error_message(self, exc: BaseException | str) -> str:
+        message = str(exc)
+        if not self._error_redaction:
+            return message
+        for pattern in self._error_redaction_patterns:
+            message = pattern.sub(_ERROR_REDACTION_REPLACEMENT, message)
+        return message
+
     def _iter_token_chunks(self, token: str, *, chunk_size: int | None = None) -> AsyncIterator[str]:
     # Providers may emit large text fragments; split them to keep downstream
     # streaming UX incremental.
@@ -314,9 +343,9 @@ window.addEventListener('load', function () {
                         async for chunk in self._iter_token_chunks(str(token)):
                             yield f"data: {chunk}\n\n"
                 except AgentConfigurationError as exc:
-                    yield f"event: error\ndata: {exc}\n\n"
+                    yield f"event: error\ndata: {self._safe_error_message(exc)}\n\n"
                 except AgentProviderError as exc:
-                    yield f"event: error\ndata: {exc}\n\n"
+                    yield f"event: error\ndata: {self._safe_error_message(exc)}\n\n"
                 yield "data: [DONE]\n\n"
                 return
 
@@ -331,9 +360,11 @@ window.addEventListener('load', function () {
                     async for token in stream:
                         await queue.put(("data", token))
                 except (AgentConfigurationError, AgentProviderError) as exc:
-                    await queue.put(("error", str(exc)))
+                    await queue.put(("error", self._safe_error_message(exc)))
                 except Exception as exc:  # noqa: BLE001
-                    await queue.put(("error", f"Internal error: {exc}"))
+                    await queue.put(
+                        ("error", self._safe_error_message(f"Internal error: {exc}"))
+                    )
                 finally:
                     await queue.put(("done", None))
 
@@ -390,9 +421,14 @@ window.addEventListener('load', function () {
                         return self._to_sse_response(result)
                     return result
                 except AgentConfigurationError as exc:
-                    return JSONResponse({"error": str(exc)}, status_code=500)
+                    return JSONResponse(
+                        {"error": self._safe_error_message(exc)}, status_code=500
+                    )
                 except AgentProviderError as exc:
-                    return JSONResponse({"error": str(exc)}, status_code=exc.status_code)
+                    return JSONResponse(
+                        {"error": self._safe_error_message(exc)},
+                        status_code=exc.status_code,
+                    )
 
             setattr(endpoint, "__signature__", signature)
 
@@ -416,9 +452,14 @@ window.addEventListener('load', function () {
                 try:
                     result = await self._invoke_handler(func, *args, **inner_kwargs)
                 except AgentConfigurationError as exc:
-                    return JSONResponse({"error": str(exc)}, status_code=500)
+                    return JSONResponse(
+                        {"error": self._safe_error_message(exc)}, status_code=500
+                    )
                 except AgentProviderError as exc:
-                    return JSONResponse({"error": str(exc)}, status_code=exc.status_code)
+                    return JSONResponse(
+                        {"error": self._safe_error_message(exc)},
+                        status_code=exc.status_code,
+                    )
 
                 if not hasattr(result, "__aiter__"):
                     raise TypeError("@app.stream handlers must return an async iterator")
