@@ -7,6 +7,7 @@ AgentAPI supports multiple providers behind one interface.
 - `openai`
 - `gemini`
 - `openrouter`
+- `anthropic`
 
 ## Selecting a Provider
 
@@ -20,6 +21,7 @@ If omitted, `DEFAULT_PROVIDER` from environment is used.
 
 - OpenAI/OpenRouter: `gpt-4o-mini`
 - Gemini: `gemini-2.5-flash`
+- Anthropic: `claude-3-5-sonnet-20241022`
 
 You can always override explicitly:
 

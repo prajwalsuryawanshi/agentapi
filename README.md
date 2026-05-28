@@ -42,7 +42,7 @@ Documentation site: https://agentapi.prajwalsuryawanshi.in
 ## Features
 
 - `Agent` class with memory and tool execution loop.
-- Provider abstraction for `openai`, `gemini`, and `openrouter`.
+- Provider abstraction for `openai`, `gemini`, `openrouter`, and `anthropic`.
 - AgentAPI app integration with `@app.chat`.
 - Automatic SSE when a chat handler returns an async iterator.
 - Built-in project scaffolding and run helper via CLI.
@@ -126,6 +126,7 @@ Supported provider names:
 - `openai`
 - `gemini`
 - `openrouter`
+- `anthropic`
 
 ## Tool Calling
 
