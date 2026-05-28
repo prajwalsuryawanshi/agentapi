@@ -92,6 +92,30 @@ def test_history_limit_preserves_system_prompt_and_recent_messages() -> None:
     ]
 
 
+def test_history_limit_none_keeps_full_history() -> None:
+    memory = InMemoryMemory()
+    for index in range(3):
+        memory.add({"role": "user", "content": f"message {index}"})
+
+    provider = RecordingProvider()
+    agent = Agent(
+        system_prompt="system stays",
+        memory=memory,
+        provider=provider,
+        max_history_messages=None,
+    )
+
+    asyncio.run(agent.run("new"))
+
+    assert provider.last_messages == [
+        {"role": "system", "content": "system stays"},
+        {"role": "user", "content": "message 0"},
+        {"role": "user", "content": "message 1"},
+        {"role": "user", "content": "message 2"},
+        {"role": "user", "content": "new"},
+    ]
+
+
 def test_stream_rejects_before_provider_call() -> None:
     provider = RecordingProvider()
     agent = Agent(system_prompt="safe", provider=provider, max_message_chars=3)
