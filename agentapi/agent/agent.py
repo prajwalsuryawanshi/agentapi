@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from agentapi.agent.memory import InMemoryMemory, MemoryBackend
 from agentapi.agent.tools import ToolDefinition, parse_tool_args, to_tool_definition
 from agentapi.config.settings import get_settings
-from agentapi.errors import AgentConfigurationError
+from agentapi.errors import AgentConfigurationError, AgentPayloadTooLargeError
 from agentapi.providers.base import BaseProvider, ToolCall
 from agentapi.providers.gemini import GeminiProvider
 from agentapi.providers.openai import OpenAIProvider
@@ -49,10 +49,14 @@ class Agent:
         model: str | None = None,
         tools: list[Callable[..., Any]] | None = None,
         tool_calling: dict[str, Any] | None = None,
+        max_message_chars: int | None = 32_000,
+        max_history_messages: int | None = 50,
     ) -> None:
         settings = get_settings()
 
         self.system_prompt = system_prompt
+        self.max_message_chars = self._validate_limit("max_message_chars", max_message_chars)
+        self.max_history_messages = self._validate_limit("max_history_messages", max_history_messages)
         if isinstance(provider, BaseProvider):
             self.provider_name = provider.__class__.__name__.lower()
         else:
@@ -82,14 +86,42 @@ class Agent:
 
     def _conversation_messages(self, extra_messages: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = [{"role": "system", "content": self.system_prompt}]
-        messages.extend(self.memory.messages)
+        messages.extend(self._limited_memory_messages())
         if extra_messages:
             messages.extend(extra_messages)
         return messages
 
+    def _limited_memory_messages(self) -> list[dict[str, Any]]:
+        memory_messages = self.memory.messages
+        if self.max_history_messages is None:
+            return list(memory_messages)
+        if self.max_history_messages == 0:
+            return []
+        return list(memory_messages[-self.max_history_messages :])
+
+    def _validate_limit(self, name: str, value: int | None) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{name} must be an integer or None")
+        if value < 0:
+            raise ValueError(f"{name} cannot be negative")
+        return value
+
+    def _ensure_message_within_limit(self, message: str) -> None:
+        if self.max_message_chars is None:
+            return
+        if len(message) <= self.max_message_chars:
+            return
+        raise AgentPayloadTooLargeError(
+            f"Message is {len(message)} characters, exceeding the configured "
+            f"max_message_chars limit of {self.max_message_chars}."
+        )
+
     async def run(self, message: str, *, max_tool_rounds: int = 3) -> str:
         """Execute a chat completion with optional tool-calling loop."""
 
+        self._ensure_message_within_limit(message)
         conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
         provider = self._get_provider()
 
@@ -162,6 +194,8 @@ class Agent:
             async for chunk in agent.stream(message):
                 print(chunk, end="", flush=True)
         """
+        self._ensure_message_within_limit(message)
+
         async def _sse_generator() -> AsyncIterator[str]:
             try:
                 async for token in self._stream_generator(message):
@@ -177,6 +211,7 @@ class Agent:
     async def _stream_generator(self, message: str) -> AsyncIterator[str]:
         """Internal async generator that streams tokens from the provider."""
 
+        self._ensure_message_within_limit(message)
         conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
         provider = self._get_provider()
 
