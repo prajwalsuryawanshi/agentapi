@@ -18,6 +18,7 @@ class Settings:
     openai_api_key: str | None
     gemini_api_key: str | None
     openrouter_api_key: str | None
+    anthropic_api_key: str | None
     default_provider: str
 
 
@@ -26,5 +27,6 @@ def get_settings() -> Settings:
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         gemini_api_key=os.getenv("GEMINI_API_KEY"),
         openrouter_api_key=os.getenv("OPENROUTER_API_KEY"),
+        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
         default_provider=os.getenv("DEFAULT_PROVIDER", "openai"),
     )

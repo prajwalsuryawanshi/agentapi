@@ -3,7 +3,7 @@
 ## Requirements
 
 - Python 3.10+
-- A provider API key (OpenAI, Gemini, or OpenRouter)
+- A provider API key (OpenAI, Gemini, OpenRouter, or Anthropic)
 
 ## Install from PyPI
 
@@ -40,6 +40,7 @@ Create a `.env` file in your project root:
 OPENAI_API_KEY=
 GEMINI_API_KEY=
 OPENROUTER_API_KEY=
+ANTHROPIC_API_KEY=
 DEFAULT_PROVIDER=openai
 ```
 

@@ -35,6 +35,9 @@ dependencies = [
 redis = [
   "redis>=5.0.0"
 ]
+anthropic = [
+  "anthropic>=0.40.0"
+]
 
 [project.urls]
 Homepage = "https://github.com/prajwalsuryawanshi/agentapi"

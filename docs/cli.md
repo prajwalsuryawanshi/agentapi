@@ -30,7 +30,7 @@ agentapi new
 
 | Option | Description |
 |--------|-------------|
-| `--provider` | Select the default provider (`openai`, `gemini`, `openrouter`) |
+| `--provider` | Select the default provider (`openai`, `gemini`, `openrouter`, `anthropic`) |
 | `--interactive` | Enable interactive project setup |
 
 ### Example
