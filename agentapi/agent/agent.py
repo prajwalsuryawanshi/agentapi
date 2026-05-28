@@ -338,4 +338,21 @@ class Agent:
     def _authorize_tool_call(self, call: ToolCall) -> ToolAuthorizationResult:
         if self.authorize_tool is None:
             return True
-        return self.authorize_tool(call)
+        try:
+            result = self.authorize_tool(call)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "[AgentAPI] authorize_tool failed for tool '%s'. Denying call.",
+                call.name,
+            )
+            return False
+
+        if result is True or result is False or isinstance(result, str):
+            return result
+
+        logger.warning(
+            "[AgentAPI] authorize_tool returned invalid result %r for tool '%s'. Denying call.",
+            result,
+            call.name,
+        )
+        return False

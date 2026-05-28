@@ -108,3 +108,52 @@ def test_authorize_tool_false_denies_with_default_message() -> None:
     assert response == "final"
     assert executed == []
     assert provider.messages[1][-1]["content"] == "Tool call 'dangerous_action' was denied by authorize_tool."
+
+
+def test_authorize_tool_exception_denies_with_default_message() -> None:
+    executed: list[str] = []
+    provider = ToolCallingProvider()
+
+    @tool
+    def dangerous_action(value: str) -> str:
+        executed.append(value)
+        return f"ran:{value}"
+
+    def authorize_tool(call: ToolCall) -> bool:
+        raise RuntimeError("policy backend unavailable")
+
+    agent = Agent(
+        system_prompt="safe",
+        provider=provider,
+        tools=[dangerous_action],
+        authorize_tool=authorize_tool,
+    )
+
+    response = asyncio.run(agent.run("please act"))
+
+    assert response == "final"
+    assert executed == []
+    assert provider.messages[1][-1]["content"] == "Tool call 'dangerous_action' was denied by authorize_tool."
+
+
+def test_authorize_tool_invalid_result_denies_with_default_message() -> None:
+    executed: list[str] = []
+    provider = ToolCallingProvider()
+
+    @tool
+    def dangerous_action(value: str) -> str:
+        executed.append(value)
+        return f"ran:{value}"
+
+    agent = Agent(
+        system_prompt="safe",
+        provider=provider,
+        tools=[dangerous_action],
+        authorize_tool=lambda call: {"allow": True},  # type: ignore[return-value]
+    )
+
+    response = asyncio.run(agent.run("please act"))
+
+    assert response == "final"
+    assert executed == []
+    assert provider.messages[1][-1]["content"] == "Tool call 'dangerous_action' was denied by authorize_tool."
