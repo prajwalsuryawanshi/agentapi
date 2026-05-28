@@ -1,16 +1,30 @@
-## Summary
+# Pull Request Summary
 
 Describe the change and why it is needed.
 
-## Changes
+## Related Issue
+
+Closes #
+
+## Changes Made
 
 -
 
-## Validation
+## Testing
 
+-
+
+## Screenshots
+
+Add screenshots if the change affects UI, docs rendering, or generated output.
+
+## Impact
+
+Explain the user or maintainer benefit of this change.
+
+## Checklist
+
+- [ ] Code follows project standards
 - [ ] I ran local checks relevant to this change
 - [ ] I updated documentation when needed
-
-## Notes
-
-Additional context for reviewers.
+- [ ] No unrelated changes are included
