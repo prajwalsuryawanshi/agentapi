@@ -48,6 +48,9 @@ class InMemoryMemory(MemoryBackend):
         *,
         time_fn: Callable[[], float] = time.monotonic,
     ) -> None:
+        if not callable(time_fn):
+            raise TypeError("time_fn must be callable")
+
         if conversation_ttl_seconds is not None and (
             isinstance(conversation_ttl_seconds, bool)
             or not isinstance(conversation_ttl_seconds, (int, float))

@@ -50,7 +50,7 @@ Use this when you need persistence across workers or servers:
 - shared state across multiple processes
 - better for production deployments
 - optional metadata like `user_id` and `tenant_id`
-- optional Redis key expiry through `ttl_seconds`
+- configurable Redis key expiry duration through `ttl_seconds` (applied by default)
 
 Example:
 

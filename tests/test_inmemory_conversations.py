@@ -153,5 +153,11 @@ def test_invalid_ttl_raises_error(ttl):
         InMemoryMemory(conversation_ttl_seconds=ttl)
 
 
+def test_time_fn_must_be_callable():
+    """Invalid time providers fail fast before memory access."""
+    with pytest.raises(TypeError, match="time_fn must be callable"):
+        InMemoryMemory(time_fn=123)  # type: ignore[arg-type]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
