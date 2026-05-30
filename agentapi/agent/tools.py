@@ -168,7 +168,7 @@ def to_tool_definition(func: Callable[..., Any]) -> ToolDefinition:
     context = getattr(func, "__agentapi_tool_context__", None) or ""
 
     return ToolDefinition(
-        name=func.__name__,
+        name=getattr(func, "__agentapi_tool_name__", func.__name__),
         description=description,
         context=context,
         func=func,
