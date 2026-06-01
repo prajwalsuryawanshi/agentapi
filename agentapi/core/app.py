@@ -6,9 +6,11 @@ import inspect
 import asyncio
 import math
 import contextlib
+import logging
 from functools import wraps
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable, TypeVar
+from uuid import uuid4
 
 from fastapi import FastAPI, Response
 from fastapi.openapi.docs import (
@@ -25,17 +27,18 @@ from agentapi.errors import AgentProviderError
 
 
 F = TypeVar("F", bound=Callable[..., Any])
+logger = logging.getLogger("agentapi")
 
 
 class AgentAPI(FastAPI):
     """A small FastAPI extension with AgentAPI-focused decorators."""
 
-    def __init__( 
+    def __init__(
         self,
-       *args: Any,
+        *args: Any,
         sse_chunk_size: int = 64,
         sse_heartbeat_seconds: float | None = None,
-       **kwargs: Any,
+        **kwargs: Any,
     ) -> None:
         if (
             isinstance(sse_chunk_size, bool)
@@ -70,7 +73,6 @@ class AgentAPI(FastAPI):
         swagger_ui_init_oauth = kwargs.pop("swagger_ui_init_oauth", None)
         swagger_ui_parameters = kwargs.pop("swagger_ui_parameters", None)
 
-        # Disable framework-default docs pages so we can serve AgentAPI-branded ones.
         super().__init__(
             *args,
             docs_url=None,
@@ -84,6 +86,7 @@ class AgentAPI(FastAPI):
         self._agentapi_swagger_ui_oauth2_redirect_url = swagger_ui_oauth2_redirect_url
         self._agentapi_swagger_ui_init_oauth = swagger_ui_init_oauth
         self._agentapi_swagger_ui_parameters = swagger_ui_parameters
+
         assets_dir = Path(__file__).resolve().parent.parent / "assets"
         self._agentapi_logo_file = assets_dir / "agentapi-logo.png"
         self._agentapi_favicon_file = assets_dir / "agentapi-favicon.png"
@@ -98,7 +101,6 @@ class AgentAPI(FastAPI):
             methods=["GET"],
             include_in_schema=False,
         )
-
         self.add_api_route(
             self._agentapi_favicon_path,
             self._favicon,
@@ -143,7 +145,7 @@ class AgentAPI(FastAPI):
         schema.setdefault("info", {})["x-logo"] = {
             "url": self._agentapi_logo_path,
             "altText": "AgentAPI",
-    }
+        }
         self.openapi_schema = schema
         return schema
 
@@ -166,92 +168,9 @@ class AgentAPI(FastAPI):
         html = bytes(base.body).decode("utf-8")
         inject = """
 <style>
-    body {
-        background: #0b1220;
-    }
-
-    .swagger-ui {
-        color: #e5eefc;
-        background: #0b1220;
-    }
-
-    .swagger-ui .topbar {
-        background-color: #111827;
-        border-bottom: 1px solid rgba(148, 163, 184, 0.18);
-    }
-
-    .swagger-ui .topbar .download-url-wrapper {
-        display: none;
-    }
-
-    .swagger-ui .scheme-container,
-    .swagger-ui .opblock,
-    .swagger-ui .btn,
-    .swagger-ui .btn.authorize,
-    .swagger-ui section.models,
-    .swagger-ui .responses-wrapper,
-    .swagger-ui .opblock .opblock-summary,
-    .swagger-ui .opblock .opblock-section-header,
-    .swagger-ui .opblock .opblock-body {
-        background: #111827 !important;
-        border-color: rgba(148, 163, 184, 0.18) !important;
-    }
-
-    .swagger-ui .opblock .opblock-summary-description,
-    .swagger-ui .opblock .opblock-summary-path,
-    .swagger-ui .opblock .opblock-summary-method,
-    .swagger-ui .info .title,
-    .swagger-ui .info p,
-    .swagger-ui table thead tr th,
-    .swagger-ui .parameter__name,
-    .swagger-ui .parameter__type,
-    .swagger-ui .response-col_status,
-    .swagger-ui .response-col_description,
-    .swagger-ui .model-title,
-    .swagger-ui .model,
-    .swagger-ui .renderedMarkdown,
-    .swagger-ui .opblock-title,
-    .swagger-ui .tab li,
-    .swagger-ui .tab li a,
-    .swagger-ui .servers-title,
-    .swagger-ui .servers, 
-    .swagger-ui .servers label {
-        color: #e5eefc !important;
-    }
-
-    .swagger-ui input,
-    .swagger-ui select,
-    .swagger-ui textarea {
-        background: #0f172a !important;
-        color: #e5eefc !important;
-        border-color: rgba(148, 163, 184, 0.25) !important;
-    }
-
-    .swagger-ui .topbar-wrapper .link img {
-        height: 28px;
-        width: auto;
-    }
-
-    .swagger-ui .btn.execute,
-    .swagger-ui .btn.authorize {
-        background: linear-gradient(135deg, #0ea5e9, #2563eb) !important;
-        color: white !important;
-        border: none !important;
-    }
+    body { background: #0b1220; }
 </style>
-<script>
-window.addEventListener('load', function () {
-    var topbarLogo = document.querySelector('.topbar-wrapper .link img');
-    if (topbarLogo) {
-        topbarLogo.src = '__FAVICON_PATH__';
-        topbarLogo.alt = 'AgentAPI';
-        topbarLogo.style.height = '28px';
-        topbarLogo.style.width = 'auto';
-    }
-});
-</script>
 """
-        inject = inject.replace("__FAVICON_PATH__", self._agentapi_favicon_path)
         return HTMLResponse(html.replace("</body>", f"{inject}</body>"))
 
     async def _swagger_ui_redirect(self) -> Response:
@@ -263,26 +182,7 @@ window.addEventListener('load', function () {
             title=f"{self.title} - ReDoc",
             redoc_favicon_url=self._agentapi_favicon_path,
         )
-
-        html = bytes(base.body).decode("utf-8")
-        inject = """
-<style>
-    body {
-        background: #0b1220;
-        color: #e5eefc;
-    }
-
-    redoc, .redoc {
-        background: #0b1220 !important;
-        color: #e5eefc !important;
-    }
-
-    a, button, input, textarea, select {
-        color: inherit;
-    }
-</style>
-"""
-        return HTMLResponse(html.replace("</head>", f"{inject}</head>"))
+        return HTMLResponse(bytes(base.body).decode("utf-8"))
 
     async def _invoke_handler(self, func: F, *args: Any, **kwargs: Any) -> Any:
         result = func(*args, **kwargs)
@@ -290,9 +190,9 @@ window.addEventListener('load', function () {
             result = await result
         return result
 
-    def _iter_token_chunks(self, token: str, *, chunk_size: int | None = None) -> AsyncIterator[str]:
-    # Providers may emit large text fragments; split them to keep downstream
-    # streaming UX incremental.
+    def _iter_token_chunks(
+        self, token: str, *, chunk_size: int | None = None
+    ) -> AsyncIterator[str]:
         size = chunk_size if chunk_size is not None else self._sse_chunk_size
 
         async def _gen() -> AsyncIterator[str]:
@@ -307,7 +207,6 @@ window.addEventListener('load', function () {
         heartbeat_seconds = self._sse_heartbeat_seconds
 
         async def sse_encoder(stream: AsyncIterator[str]) -> AsyncIterator[str]:
-            # Heartbeat disabled — preserve the original streaming behavior exactly.
             if not heartbeat_seconds:
                 try:
                     async for token in stream:
@@ -320,10 +219,6 @@ window.addEventListener('load', function () {
                 yield "data: [DONE]\n\n"
                 return
 
-            # Heartbeat enabled — read upstream in a background task and emit
-            # ': keepalive\n\n' whenever no data has arrived for the configured
-            # interval. The ':' prefix is a valid SSE comment that clients
-            # ignore but proxies see as activity, keeping the connection open.
             queue: asyncio.Queue = asyncio.Queue()
 
             async def producer() -> None:
@@ -354,7 +249,7 @@ window.addEventListener('load', function () {
                     if kind == "error":
                         yield f"event: error\ndata: {payload}\n\n"
                         continue
-                    # kind == "data"
+
                     async for chunk in self._iter_token_chunks(str(payload)):
                         yield f"data: {chunk}\n\n"
             finally:
@@ -373,60 +268,115 @@ window.addEventListener('load', function () {
         )
 
     def chat(self, path: str, **kwargs: Any) -> Callable[[F], F]:
-        """Register a chat route.
-
-        If the handler returns an async iterator, AgentAPI automatically responds
-        as SSE (`text/event-stream`). Otherwise, it returns regular JSON.
-        """
+        """Register a chat route."""
 
         def decorator(func: F) -> F:
             signature = inspect.signature(func)
 
             @wraps(func)
             async def endpoint(*args: Any, **inner_kwargs: Any) -> Any:
+                request_id = str(uuid4())
+                logger.info(
+                    "agentapi.request.start request_id=%s path=%s handler=%s",
+                    request_id,
+                    path,
+                    func.__name__,
+                )
+
                 try:
                     result = await self._invoke_handler(func, *args, **inner_kwargs)
                     if hasattr(result, "__aiter__"):
+                        logger.info(
+                            "agentapi.request.stream request_id=%s path=%s handler=%s",
+                            request_id,
+                            path,
+                            func.__name__,
+                        )
                         return self._to_sse_response(result)
+
+                    logger.info(
+                        "agentapi.request.success request_id=%s path=%s handler=%s",
+                        request_id,
+                        path,
+                        func.__name__,
+                    )
                     return result
                 except AgentConfigurationError as exc:
+                    logger.exception(
+                        "agentapi.request.error request_id=%s path=%s handler=%s",
+                        request_id,
+                        path,
+                        func.__name__,
+                    )
                     return JSONResponse({"error": str(exc)}, status_code=500)
                 except AgentProviderError as exc:
+                    logger.exception(
+                        "agentapi.request.error request_id=%s path=%s handler=%s",
+                        request_id,
+                        path,
+                        func.__name__,
+                    )
                     return JSONResponse({"error": str(exc)}, status_code=exc.status_code)
 
             setattr(endpoint, "__signature__", signature)
-
             self.post(path, **kwargs)(endpoint)
             return func
 
         return decorator
 
     def stream(self, path: str, **kwargs: Any) -> Callable[[F], F]:
-        """Register an SSE streaming route.
-
-        Backward-compatible alias for explicit streaming-only endpoints.
-        New code can use `@app.chat` and simply return an async iterator.
-        """
+        """Register an SSE streaming route."""
 
         def decorator(func: F) -> F:
             signature = inspect.signature(func)
 
             @wraps(func)
             async def endpoint(*args: Any, **inner_kwargs: Any) -> Any:
+                request_id = str(uuid4())
+                logger.info(
+                    "agentapi.request.start request_id=%s path=%s handler=%s",
+                    request_id,
+                    path,
+                    func.__name__,
+                )
+
                 try:
                     result = await self._invoke_handler(func, *args, **inner_kwargs)
                 except AgentConfigurationError as exc:
+                    logger.exception(
+                        "agentapi.request.error request_id=%s path=%s handler=%s",
+                        request_id,
+                        path,
+                        func.__name__,
+                    )
                     return JSONResponse({"error": str(exc)}, status_code=500)
                 except AgentProviderError as exc:
+                    logger.exception(
+                        "agentapi.request.error request_id=%s path=%s handler=%s",
+                        request_id,
+                        path,
+                        func.__name__,
+                    )
                     return JSONResponse({"error": str(exc)}, status_code=exc.status_code)
 
                 if not hasattr(result, "__aiter__"):
+                    logger.error(
+                        "agentapi.request.invalid_stream request_id=%s path=%s handler=%s",
+                        request_id,
+                        path,
+                        func.__name__,
+                    )
                     raise TypeError("@app.stream handlers must return an async iterator")
 
+                logger.info(
+                    "agentapi.request.stream request_id=%s path=%s handler=%s",
+                    request_id,
+                    path,
+                    func.__name__,
+                )
                 return self._to_sse_response(result)
 
             setattr(endpoint, "__signature__", signature)
-
             self.post(path, **kwargs)(endpoint)
             return func
 
