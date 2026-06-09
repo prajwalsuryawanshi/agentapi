@@ -22,6 +22,7 @@ class OpenAICompatibleProvider(BaseProvider):
         base_url: str,
         extra_headers: dict[str, str] | None = None,
     ) -> None:
+        """Initialize the OpenAI-compatible provider."""
         if not api_key:
             raise AgentConfigurationError("Missing API key. Set the appropriate API key in your .env file.")
 
@@ -32,6 +33,7 @@ class OpenAICompatibleProvider(BaseProvider):
 
     @property
     def _headers(self) -> dict[str, str]:
+        """Construct the HTTP headers required for API requests."""
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -76,6 +78,7 @@ class OpenAICompatibleProvider(BaseProvider):
         tools: list[dict[str, Any]] | None = None,
         tool_calling: dict[str, Any] | None = None,
     ) -> ProviderResponse:
+        """Execute a standard non-streaming chat completion request."""
         tool_calling = tool_calling or {}
         payload: dict[str, Any] = {
             "model": self.model,
@@ -134,6 +137,7 @@ class OpenAICompatibleProvider(BaseProvider):
         tools: list[dict[str, Any]] | None = None,
         tool_calling: dict[str, Any] | None = None,
     ) -> AsyncIterator[str]:
+        """Execute a streaming chat completion request yielding content deltas."""
         tool_calling = tool_calling or {}
         payload: dict[str, Any] = {
             "model": self.model,
@@ -194,6 +198,7 @@ class OpenAICompatibleProvider(BaseProvider):
                 ) from None
 
     async def _safe_error_detail(self, response: httpx.Response) -> str:
+        """Safely extract error details from an HTTP response, limiting length to prevent leakage."""
         try:
             raw = await response.aread()
             if raw:

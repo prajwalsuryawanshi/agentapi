@@ -9,6 +9,7 @@ from agentapi.providers.base import BaseProvider, ProviderResponse, ToolCall
 
 class AnthropicProvider(BaseProvider):
     def __init__(self, api_key: str, model: str) -> None:
+        """Initialize the Anthropic provider with an API key and model."""
         self.client = AsyncAnthropic(api_key=api_key)
         self.model = model
 
@@ -47,6 +48,7 @@ class AnthropicProvider(BaseProvider):
         return anthropic_tools
 
     async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, tool_calling: dict[str, Any] | None = None) -> ProviderResponse:
+        """Execute a single chat completion request against the Anthropic API."""
         system, formatted_messages = self._format_messages(messages)
         formatted_tools = self._format_tools(tools)
         
@@ -83,6 +85,7 @@ class AnthropicProvider(BaseProvider):
         return ProviderResponse(content=content, tool_calls=tool_calls, raw_message=response.model_dump())
 
     async def stream(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, tool_calling: dict[str, Any] | None = None) -> AsyncIterator[str]:
+        """Stream a chat completion request from the Anthropic API."""
         system, formatted_messages = self._format_messages(messages)
         
         kwargs = {

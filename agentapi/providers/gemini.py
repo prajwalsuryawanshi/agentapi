@@ -16,6 +16,7 @@ class GeminiProvider(BaseProvider):
     """Provider for Gemini generateContent and streamGenerateContent APIs."""
 
     def __init__(self, *, api_key: str, model: str) -> None:
+        """Initialize the Gemini provider."""
         if not api_key:
             raise AgentConfigurationError("Missing Gemini API key. Set GEMINI_API_KEY in your .env file.")
 
@@ -30,6 +31,7 @@ class GeminiProvider(BaseProvider):
         tools: list[dict[str, Any]] | None = None,
         tool_calling: dict[str, Any] | None = None,
     ) -> ProviderResponse:
+        """Execute a standard chat generation request against Gemini."""
         payload = self._build_payload(messages, tools=tools, tool_calling=tool_calling)
 
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -60,6 +62,7 @@ class GeminiProvider(BaseProvider):
         tools: list[dict[str, Any]] | None = None,
         tool_calling: dict[str, Any] | None = None,
     ) -> AsyncIterator[str]:
+        """Execute a streaming generation request against Gemini, yielding text chunks."""
         payload = self._build_payload(messages, tools=tools, tool_calling=tool_calling)
         last_text = ""
 
@@ -115,6 +118,7 @@ class GeminiProvider(BaseProvider):
         *,
         detail: str | None = None,
     ) -> AgentProviderError:
+        """Map raw httpx HTTP errors into clean AgentProviderError exceptions."""
         if detail is None:
             detail = self._safe_error_detail_sync(exc.response)
         status = exc.response.status_code
@@ -133,6 +137,7 @@ class GeminiProvider(BaseProvider):
         )
 
     async def _safe_error_detail(self, response: httpx.Response) -> str:
+        """Safely read and truncate async HTTP error response details to avoid leaking secrets."""
         try:
             raw = await response.aread()
             if raw:
@@ -142,6 +147,7 @@ class GeminiProvider(BaseProvider):
         return self._safe_error_detail_sync(response)
 
     def _safe_error_detail_sync(self, response: httpx.Response) -> str:
+        """Safely read and truncate synchronous HTTP error response details to avoid leaking secrets."""
         try:
             text = response.text
             if text:
@@ -157,6 +163,7 @@ class GeminiProvider(BaseProvider):
         tools: list[dict[str, Any]] | None = None,
         tool_calling: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Convert standard message structures into Gemini's payload format."""
         system_prompt: str | None = None
         contents: list[dict[str, Any]] = []
 
@@ -246,6 +253,7 @@ class GeminiProvider(BaseProvider):
         return payload
 
     def _extract_tool_calls(self, data: dict[str, Any]) -> list[ToolCall]:
+        """Parse Gemini tool call candidate responses into a standard format."""
         candidates = data.get("candidates") or []
         if not candidates:
             return []
@@ -269,6 +277,7 @@ class GeminiProvider(BaseProvider):
         return result
 
     def _to_function_declarations(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Convert standard tool schemas into Gemini function declarations."""
         declarations: list[dict[str, Any]] = []
 
         for tool in tools:
@@ -286,6 +295,7 @@ class GeminiProvider(BaseProvider):
         return declarations
 
     def _to_function_response_payload(self, content: Any) -> dict[str, Any]:
+        """Format a tool return value to be supplied back to Gemini."""
         if content is None:
             return {"result": None}
 
@@ -300,6 +310,7 @@ class GeminiProvider(BaseProvider):
             return {"result": text}
 
     def _extract_text(self, data: dict[str, Any]) -> str:
+        """Extract all text chunks from a Gemini generation candidate."""
         candidates = data.get("candidates") or []
         if not candidates:
             return ""
