@@ -108,9 +108,9 @@ class RedisMemory(MemoryBackend):
     def _ensure_meta(self) -> None:
         if self._redis.exists(self._meta_key):
             meta = self._redis.hgetall(self._meta_key)
-            if self.user_id is not None and meta.get("user_id") != self.user_id:
+            if "user_id" in meta and meta["user_id"] != self.user_id:
                 raise ValueError("Unauthorized: user_id mismatch")
-            if self.tenant_id is not None and meta.get("tenant_id") != self.tenant_id:
+            if "tenant_id" in meta and meta["tenant_id"] != self.tenant_id:
                 raise ValueError("Unauthorized: tenant_id mismatch")
             return
 
