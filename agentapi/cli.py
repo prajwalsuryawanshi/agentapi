@@ -9,7 +9,21 @@ import sys
 from pathlib import Path
 
 
-MAIN_TEMPLATE = '''from agentapi import AgentAPI, Agent\n\napp = AgentAPI()\n\nagent = Agent(\n    system_prompt="You are a helpful assistant",\n    provider="{provider}",\n)\n\n\n@app.chat("/chat")\nasync def chat(message: str):\n    return await agent.run(message)\n\n\n@app.chat("/stream")\nasync def stream_chat(message: str):\n    return agent.stream(message)\n'''
+MAIN_TEMPLATE = '''from agentapi import AgentAPI
+from agents import assistant
+
+app = AgentAPI()
+
+
+@app.chat("/chat")
+async def chat(message: str):
+    return await assistant.run(message)
+
+
+@app.chat("/stream")
+async def stream_chat(message: str):
+    return assistant.stream(message)
+'''
 
 TOOLS_TEMPLATE = '''from agentapi import tool\n\n\n@tool\ndef get_weather(city: str) -> str:\n    """Get weather information for a city."""\n    return f"Weather in {city}: sunny"\n'''
 
