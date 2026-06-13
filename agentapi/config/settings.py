@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+SUPPORTED_PROVIDERS = ("openai", "gemini", "openrouter")
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -19,6 +21,19 @@ class Settings:
     gemini_api_key: str | None
     openrouter_api_key: str | None
     default_provider: str
+
+    def __post_init__(self) -> None:
+        """Validate the default provider at initialization time."""
+        provider = (self.default_provider or "").lower()
+
+        if provider not in SUPPORTED_PROVIDERS:
+            supported = ", ".join(SUPPORTED_PROVIDERS)
+            raise ValueError(
+                f"Invalid default_provider: {self.default_provider!r}. "
+                f"Expected one of: {supported}."
+            )
+
+        object.__setattr__(self, "default_provider", provider)
 
 
 def get_settings() -> Settings:
