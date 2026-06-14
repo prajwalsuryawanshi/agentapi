@@ -24,6 +24,7 @@ ProviderFactory = Callable[["Agent", Any, str], BaseProvider]
 
 class AgentAPIUsageError(Exception):
     """Raised when the developer uses the AgentAPI incorrectly."""
+
     pass
 
 
@@ -139,10 +140,10 @@ class Agent:
                 )
             except AgentAPIProviderError as exc:
                 last_error = exc
-                logger.warning("[AgentAPI] Provider '%s' failed in run(); trying fallback if available.", provider_name)
-            except Exception as exc:
-                last_error = exc
-                logger.warning("[AgentAPI] Provider '%s' failed in run(); trying fallback if available.", provider_name)
+                logger.warning(
+                    "[AgentAPI] Provider '%s' failed in run(); trying fallback if available.",
+                    provider_name,
+                )
 
         raise AgentAPIProviderError(
             f"All provider calls failed. Last error: {last_error}. "
@@ -169,30 +170,31 @@ class Agent:
         """Internal async generator that streams tokens from the provider."""
 
         conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
-        collected: list[str] = []
         last_error: Exception | None = None
 
         for provider_name, provider in self._provider_chain():
+            provider_collected: list[str] = []
+
             try:
                 async for token in provider.stream(
                     conversation_messages,
                     tools=self._tool_schemas(),
                     tool_calling=self.tool_calling,
                 ):
-                    collected.append(token)
+                    provider_collected.append(token)
                     yield token
 
-                full_text = "".join(collected)
+                full_text = "".join(provider_collected)
                 self.memory.add({"role": "user", "content": message})
                 self.memory.add({"role": "assistant", "content": full_text})
                 return
 
             except AgentAPIProviderError as exc:
                 last_error = exc
-                logger.warning("[AgentAPI] Provider '%s' failed in stream(); trying fallback if available.", provider_name)
-            except Exception as exc:
-                last_error = exc
-                logger.warning("[AgentAPI] Provider '%s' failed in stream(); trying fallback if available.", provider_name)
+                logger.warning(
+                    "[AgentAPI] Provider '%s' failed in stream(); trying fallback if available.",
+                    provider_name,
+                )
 
         raise AgentAPIProviderError(
             f"All streaming provider calls failed. Last error: {last_error}",
@@ -250,11 +252,16 @@ class Agent:
 
     def _create_provider_by_name(self, provider_name: str) -> BaseProvider:
         original_provider_name = self.provider_name
+        original_model = self.model
+
         try:
-            self.provider_name = provider_name.strip().lower()
+            normalized_provider_name = provider_name.strip().lower()
+            self.provider_name = normalized_provider_name
+            self.model = self._default_model_for(normalized_provider_name)
             return self._create_provider(self._settings)
         finally:
             self.provider_name = original_provider_name
+            self.model = original_model
 
     def _provider_chain(self) -> list[tuple[str, BaseProvider]]:
         providers: list[tuple[str, BaseProvider]] = [(self.provider_name, self._get_provider())]
@@ -265,7 +272,14 @@ class Agent:
             if not fallback_name or fallback_name == self.provider_name:
                 continue
 
-            providers.append((fallback_name, self._create_provider_by_name(fallback_name)))
+            try:
+                providers.append((fallback_name, self._create_provider_by_name(fallback_name)))
+            except AgentConfigurationError as exc:
+                logger.warning(
+                    "[AgentAPI] Skipping fallback provider '%s' due to configuration error: %s",
+                    fallback_name,
+                    exc,
+                )
 
         return providers
 

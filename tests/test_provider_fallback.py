@@ -6,10 +6,10 @@ from agentapi.providers.base import BaseProvider, ProviderResponse
 
 class FailingProvider(BaseProvider):
     async def chat(self, messages, *, tools=None, tool_calling=None):
-        raise RuntimeError("primary failed")
+        raise AgentAPIProviderError("primary failed")
 
     async def stream(self, messages, *, tools=None, tool_calling=None):
-        raise RuntimeError("primary stream failed")
+        raise AgentAPIProviderError("primary stream failed")
         yield
 
 
@@ -24,10 +24,10 @@ class WorkingProvider(BaseProvider):
 
 class AlwaysFailProvider(BaseProvider):
     async def chat(self, messages, *, tools=None, tool_calling=None):
-        raise RuntimeError("provider failed")
+        raise AgentAPIProviderError("provider failed")
 
     async def stream(self, messages, *, tools=None, tool_calling=None):
-        raise RuntimeError("provider stream failed")
+        raise AgentAPIProviderError("provider stream failed")
         yield
 
 
