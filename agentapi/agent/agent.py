@@ -24,6 +24,7 @@ ProviderFactory = Callable[["Agent", Any, str], BaseProvider]
 
 class AgentAPIUsageError(Exception):
     """Raised when the developer uses the AgentAPI incorrectly."""
+
     pass
 
 
@@ -91,26 +92,9 @@ class Agent:
         """Execute a chat completion with optional tool-calling loop."""
 
         conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
-        provider = self._get_provider()
 
         for _ in range(max_tool_rounds + 1):
-            # Narrow the provider error wrapper to only the actual provider call.
-            try:
-                response = await provider.chat(
-                    conversation_messages,
-                    tools=self._tool_schemas(),
-                    tool_calling=self.tool_calling,
-                )
-            except AgentAPIProviderError:
-                raise
-            except Exception as exc:
-                logger.exception(
-                    "[AgentAPI] Provider error in run(). Check your API key and provider configuration."
-                )
-                raise AgentAPIProviderError(
-                    f"Provider call failed: {exc}. Check your API key and provider configuration.",
-                    original=exc,
-                ) from exc
+            response = await self._chat_with_fallback(conversation_messages)
 
             if response.tool_calls:
                 conversation_messages.append(
@@ -142,26 +126,34 @@ class Agent:
         self.memory.add({"role": "assistant", "content": fallback})
         return fallback
 
+    async def _chat_with_fallback(self, conversation_messages: list[dict[str, Any]]) -> Any:
+        """Call chat on the primary provider, then fallback providers if configured."""
+
+        last_error: Exception | None = None
+
+        for provider_name, provider in self._provider_chain():
+            try:
+                return await provider.chat(
+                    conversation_messages,
+                    tools=self._tool_schemas(),
+                    tool_calling=self.tool_calling,
+                )
+            except AgentAPIProviderError as exc:
+                last_error = exc
+                logger.warning(
+                    "[AgentAPI] Provider '%s' failed in run(); trying fallback if available.",
+                    provider_name,
+                )
+
+        raise AgentAPIProviderError(
+            f"All provider calls failed. Last error: {last_error}. "
+            "Check your API keys, provider configuration, and fallback providers.",
+            original=last_error,
+        )
+
     def stream(self, message: str) -> StreamingResponse:
-        """Stream model tokens as FastAPI StreamingResponse using SSE format.
+        """Stream model tokens as FastAPI StreamingResponse using SSE format."""
 
-        Each token is split on newline boundaries and emitted as valid SSE
-        frames so multi-line payloads remain a single logical SSE event.
-        Provider errors are logged server-side and surfaced as a sanitized
-        ``data: [ERROR] ...\\n\\n`` event so the client never receives raw
-        exception text.
-
-        Examples::
-
-            # FastAPI endpoint
-            @app.post("/chat/stream")
-            async def chat_stream(message: str):
-                return agent.stream(message)
-
-            # Direct async iteration
-            async for chunk in agent.stream(message):
-                print(chunk, end="", flush=True)
-        """
         async def _sse_generator() -> AsyncIterator[str]:
             try:
                 async for token in self._stream_generator(message):
@@ -178,32 +170,36 @@ class Agent:
         """Internal async generator that streams tokens from the provider."""
 
         conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
-        provider = self._get_provider()
+        last_error: Exception | None = None
 
-        collected: list[str] = []
+        for provider_name, provider in self._provider_chain():
+            provider_collected: list[str] = []
 
-        try:
-            async for token in provider.stream(
-                conversation_messages,
-                tools=self._tool_schemas(),
-                tool_calling=self.tool_calling,
-            ):
-                collected.append(token)
-                yield token
-        except AgentAPIProviderError:
-            raise
-        except Exception as exc:
-            logger.exception(
-                "[AgentAPI] Streaming error. Check your provider configuration and API key."
-            )
-            raise AgentAPIProviderError(
-                f"Streaming failed: {exc}",
-                original=exc,
-            ) from exc
+            try:
+                async for token in provider.stream(
+                    conversation_messages,
+                    tools=self._tool_schemas(),
+                    tool_calling=self.tool_calling,
+                ):
+                    provider_collected.append(token)
+                    yield token
 
-        full_text = "".join(collected)
-        self.memory.add({"role": "user", "content": message})
-        self.memory.add({"role": "assistant", "content": full_text})
+                full_text = "".join(provider_collected)
+                self.memory.add({"role": "user", "content": message})
+                self.memory.add({"role": "assistant", "content": full_text})
+                return
+
+            except AgentAPIProviderError as exc:
+                last_error = exc
+                logger.warning(
+                    "[AgentAPI] Provider '%s' failed in stream(); trying fallback if available.",
+                    provider_name,
+                )
+
+        raise AgentAPIProviderError(
+            f"All streaming provider calls failed. Last error: {last_error}",
+            original=last_error,
+        )
 
     def _create_provider(self, settings: Any) -> BaseProvider:
         custom_factory = self._custom_provider_factories.get(self.provider_name)
@@ -231,7 +227,7 @@ class Agent:
         if self.provider_name == "anthropic":
             from agentapi.providers.anthropic import AnthropicProvider
             import os
-            # Use getattr to safely check settings, fallback to os env if settings doesn't have it yet
+
             api_key = getattr(settings, "anthropic_api_key", os.getenv("ANTHROPIC_API_KEY"))
             return AnthropicProvider(
                 api_key=self._require_api_key(api_key, "ANTHROPIC_API_KEY"),
@@ -253,6 +249,39 @@ class Agent:
         if self._provider is None:
             self._provider = self._create_provider(self._settings)
         return self._provider
+
+    def _create_provider_by_name(self, provider_name: str) -> BaseProvider:
+        original_provider_name = self.provider_name
+        original_model = self.model
+
+        try:
+            normalized_provider_name = provider_name.strip().lower()
+            self.provider_name = normalized_provider_name
+            self.model = self._default_model_for(normalized_provider_name)
+            return self._create_provider(self._settings)
+        finally:
+            self.provider_name = original_provider_name
+            self.model = original_model
+
+    def _provider_chain(self) -> list[tuple[str, BaseProvider]]:
+        providers: list[tuple[str, BaseProvider]] = [(self.provider_name, self._get_provider())]
+        fallback_provider_names = getattr(self._settings, "fallback_providers", [])
+
+        for fallback_name in fallback_provider_names:
+            fallback_name = fallback_name.strip().lower()
+            if not fallback_name or fallback_name == self.provider_name:
+                continue
+
+            try:
+                providers.append((fallback_name, self._create_provider_by_name(fallback_name)))
+            except AgentConfigurationError as exc:
+                logger.warning(
+                    "[AgentAPI] Skipping fallback provider '%s' due to configuration error: %s",
+                    fallback_name,
+                    exc,
+                )
+
+        return providers
 
     def _require_api_key(self, value: str | None, env_name: str) -> str:
         if value and value.strip():
