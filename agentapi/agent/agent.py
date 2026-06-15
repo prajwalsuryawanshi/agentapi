@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import inspect
+import json
 import logging
-from typing import Any, AsyncIterator, Callable
+import time
+from typing import Any, AsyncIterator, Callable, TypeVar
 
 from fastapi.responses import StreamingResponse
 
@@ -21,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 ProviderFactory = Callable[["Agent", Any, str], BaseProvider]
 
+T = TypeVar("T")
+
 
 class AgentAPIUsageError(Exception):
     """Raised when the developer uses the AgentAPI incorrectly."""
@@ -33,6 +37,11 @@ class AgentAPIProviderError(Exception):
     def __init__(self, message: str, original: Exception | None = None) -> None:
         super().__init__(message)
         self.original = original
+
+
+class AgentOutputValidationError(ValueError):
+    """Raised when the LLM response cannot be parsed or validated against
+    the configured ``output_schema`` after all retry attempts are exhausted."""
 
 
 class Agent:
@@ -49,7 +58,28 @@ class Agent:
         model: str | None = None,
         tools: list[Callable[..., Any]] | None = None,
         tool_calling: dict[str, Any] | None = None,
+        output_schema: type | None = None,
+        output_schema_retries: int = 1,
     ) -> None:
+        """Initialise the Agent.
+
+        Args:
+            system_prompt: The system prompt sent to the LLM on every turn.
+            memory: Memory backend for conversation history.
+            provider: Provider name string or a :class:`~agentapi.providers.base.BaseProvider`
+                instance.  Defaults to ``DEFAULT_PROVIDER`` from settings.
+            model: Model identifier passed to the provider.
+            tools: List of callables registered as tools.
+            tool_calling: Override default tool-calling config for the provider.
+            output_schema: Optional Pydantic ``BaseModel`` subclass.  When set,
+                the agent instructs the LLM to respond in JSON and validates the
+                response against the schema.  If validation fails it retries up
+                to ``output_schema_retries`` times before raising
+                :class:`AgentOutputValidationError`.
+            output_schema_retries: Number of additional attempts to get a valid
+                response when ``output_schema`` is set and validation fails.
+                Defaults to ``1``.
+        """
         settings = get_settings()
 
         self.system_prompt = system_prompt
@@ -67,9 +97,18 @@ class Agent:
         self._settings = settings
         self._provider: BaseProvider | None = provider if isinstance(provider, BaseProvider) else None
         self._tools: dict[str, ToolDefinition] = {}
+        self._output_schema = output_schema
+        self._output_schema_retries = max(0, output_schema_retries)
+
+        if output_schema is not None:
+            self._validate_output_schema(output_schema)
 
         for func in tools or []:
             self.add_tool(func)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     def add_tool(self, func: Callable[..., Any]) -> None:
         """Register a callable tool on the agent."""
@@ -81,14 +120,18 @@ class Agent:
         self.memory.reset()
 
     def _conversation_messages(self, extra_messages: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
-        messages: list[dict[str, Any]] = [{"role": "system", "content": self.system_prompt}]
+        messages: list[dict[str, Any]] = [{"role": "system", "content": self._effective_system_prompt()}]
         messages.extend(self.memory.messages)
         if extra_messages:
             messages.extend(extra_messages)
         return messages
 
-    async def run(self, message: str, *, max_tool_rounds: int = 3) -> str:
-        """Execute a chat completion with optional tool-calling loop."""
+    async def run(self, message: str, *, max_tool_rounds: int = 3) -> str | Any:
+        """Execute a chat completion with optional tool-calling loop.
+
+        When ``output_schema`` is configured the return type is an instance of
+        that Pydantic model instead of a plain string.
+        """
 
         conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
         provider = self._get_provider()
@@ -135,6 +178,15 @@ class Agent:
 
             self.memory.add({"role": "user", "content": message})
             self.memory.add({"role": "assistant", "content": response.content})
+
+            if self._output_schema is not None:
+                return await self._validate_and_parse(
+                    response.content or "",
+                    message,
+                    provider,
+                    max_tool_rounds,
+                )
+
             return response.content
 
         fallback = "Tool loop reached max rounds without final response"
@@ -148,7 +200,7 @@ class Agent:
         Each token is split on newline boundaries and emitted as valid SSE
         frames so multi-line payloads remain a single logical SSE event.
         Provider errors are logged server-side and surfaced as a sanitized
-        ``data: [ERROR] ...\\n\\n`` event so the client never receives raw
+        ``data: [ERROR] ...\n\n`` event so the client never receives raw
         exception text.
 
         Examples::
@@ -204,6 +256,122 @@ class Agent:
         full_text = "".join(collected)
         self.memory.add({"role": "user", "content": message})
         self.memory.add({"role": "assistant", "content": full_text})
+
+    # ------------------------------------------------------------------
+    # Output schema validation helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _validate_output_schema(schema: type) -> None:
+        """Ensure *schema* is a Pydantic BaseModel subclass."""
+        try:
+            from pydantic import BaseModel  # type: ignore[import]
+        except ImportError as exc:  # pragma: no cover
+            raise ImportError(
+                "pydantic is required for output_schema validation. "
+                "Install with: pip install pydantic"
+            ) from exc
+
+        if not (isinstance(schema, type) and issubclass(schema, BaseModel)):
+            raise TypeError(
+                f"output_schema must be a Pydantic BaseModel subclass, got {schema!r}"
+            )
+
+    def _effective_system_prompt(self) -> str:
+        """Return the system prompt, appending JSON mode instructions when needed."""
+        if self._output_schema is None:
+            return self.system_prompt
+
+        try:
+            schema_json = self._output_schema.model_json_schema()  # Pydantic v2
+        except AttributeError:
+            schema_json = self._output_schema.schema()  # Pydantic v1 fallback
+
+        schema_str = json.dumps(schema_json, indent=2)
+        return (
+            f"{self.system_prompt}\n\n"
+            "You MUST respond with valid JSON only — no markdown, no prose.\n"
+            f"The JSON must conform to this schema:\n{schema_str}"
+        )
+
+    async def _validate_and_parse(  # type: ignore[return]
+        self,
+        content: str,
+        original_message: str,
+        provider: BaseProvider,
+        max_tool_rounds: int,
+    ) -> Any:
+        """Try to parse and validate *content* against ``_output_schema``.
+
+        If validation fails, retries by calling the provider again with an
+        error correction prompt.  After all retries are exhausted raises
+        :class:`AgentOutputValidationError`.
+        """
+        from pydantic import ValidationError  # type: ignore[import]
+
+        last_error: str = ""
+        attempt_content = content
+
+        for attempt in range(self._output_schema_retries + 1):
+            try:
+                raw = self._extract_json(attempt_content)
+                parsed = self._output_schema.model_validate(raw)  # type: ignore[attr-defined]
+                return parsed
+            except (json.JSONDecodeError, ValidationError, AttributeError) as exc:
+                last_error = str(exc)
+                if attempt < self._output_schema_retries:
+                    logger.warning(
+                        "[AgentAPI] output_schema validation failed; retrying",
+                        extra={"attempt": attempt + 1, "error": last_error},
+                    )
+                    # Ask the model to fix its output.
+                    correction_messages = self._conversation_messages(
+                        [
+                            {"role": "user", "content": original_message},
+                            {"role": "assistant", "content": attempt_content},
+                            {
+                                "role": "user",
+                                "content": (
+                                    f"Your previous response could not be parsed as valid JSON "
+                                    f"matching the required schema.\nError: {last_error}\n"
+                                    "Please respond again with ONLY valid JSON."
+                                ),
+                            },
+                        ]
+                    )
+                    try:
+                        retry_response = await provider.chat(
+                            correction_messages,
+                            tools=None,
+                            tool_calling=self.tool_calling,
+                        )
+                        attempt_content = retry_response.content or ""
+                    except Exception as retry_exc:
+                        raise AgentOutputValidationError(
+                            f"Provider call failed during schema-validation retry: {retry_exc}"
+                        ) from retry_exc
+
+        raise AgentOutputValidationError(
+            f"LLM response could not be validated against '{self._output_schema.__name__}' "
+            f"after {self._output_schema_retries + 1} attempt(s). "
+            f"Last error: {last_error}\nLast content: {attempt_content!r}"
+        )
+
+    @staticmethod
+    def _extract_json(text: str) -> Any:
+        """Extract a JSON value from *text*, stripping markdown fences if present."""
+        stripped = text.strip()
+        # Strip common markdown code fences: ```json ... ``` or ``` ... ```
+        if stripped.startswith("```"):
+            lines = stripped.splitlines()
+            # Drop first line (```json or ```) and last line (```)
+            inner = "\n".join(lines[1:-1]) if len(lines) > 2 else ""
+            stripped = inner.strip()
+        return json.loads(stripped)
+
+    # ------------------------------------------------------------------
+    # Provider / tool internals
+    # ------------------------------------------------------------------
 
     def _create_provider(self, settings: Any) -> BaseProvider:
         custom_factory = self._custom_provider_factories.get(self.provider_name)
