@@ -144,3 +144,202 @@ class RedisMemory(MemoryBackend):
 
     def close(self) -> None:
         self._redis.close()
+
+
+class PostgresMemory(MemoryBackend):
+    """PostgreSQL-backed memory for multi-user and multi-worker deployments.
+
+    Stores conversation messages in a ``agentapi_conversations`` table as
+    JSONB rows.  The table is created automatically on first use if it does
+    not already exist.
+
+    Requires: ``pip install asyncpg``
+
+    Example usage::
+
+        import asyncio
+        from agentapi import Agent, PostgresMemory
+
+        async def main():
+            memory = await PostgresMemory.create(
+                dsn="postgresql://user:password@localhost/mydb",
+                conversation_id="some-uuid",
+            )
+            agent = Agent(
+                system_prompt="You are a helpful assistant",
+                provider="openai",
+                memory=memory,
+            )
+            reply = await agent.run("Hello!")
+            print(reply)
+            await memory.close()
+
+        asyncio.run(main())
+    """
+
+    _CREATE_TABLE_SQL = """
+        CREATE TABLE IF NOT EXISTS agentapi_conversations (
+            id            BIGSERIAL PRIMARY KEY,
+            conversation_id TEXT      NOT NULL,
+            user_id         TEXT,
+            tenant_id       TEXT,
+            message_data    JSONB     NOT NULL,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_agentapi_conv_id
+            ON agentapi_conversations (conversation_id);
+    """
+
+    def __init__(
+        self,
+        *,
+        pool: Any,  # asyncpg.Pool
+        conversation_id: str,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> None:
+        """Low-level constructor.  Prefer :meth:`create` for normal usage."""
+        # Validate and normalize to canonical UUID string.
+        self.conversation_id = str(UUID(conversation_id))
+        self.user_id = user_id
+        self.tenant_id = tenant_id
+        self._pool = pool
+
+    # ------------------------------------------------------------------
+    # Async factory
+    # ------------------------------------------------------------------
+
+    @classmethod
+    async def create(
+        cls,
+        *,
+        dsn: str,
+        conversation_id: str,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+        min_size: int = 1,
+        max_size: int = 10,
+    ) -> "PostgresMemory":
+        """Create a connection pool and return a ready-to-use ``PostgresMemory``.
+
+        Args:
+            dsn: PostgreSQL connection string, e.g.
+                ``"postgresql://user:password@host/dbname"``.
+            conversation_id: UUID string that identifies this conversation.
+            user_id: Optional owner identifier for multi-tenant isolation.
+            tenant_id: Optional tenant identifier for multi-tenant isolation.
+            min_size: Minimum connections kept in the pool (default 1).
+            max_size: Maximum connections in the pool (default 10).
+
+        Returns:
+            A fully initialised :class:`PostgresMemory` instance.
+
+        Raises:
+            ImportError: If ``asyncpg`` is not installed.
+        """
+        try:
+            asyncpg = import_module("asyncpg")
+        except ImportError as exc:  # pragma: no cover
+            raise ImportError(
+                "asyncpg package is required for PostgresMemory. "
+                "Install with: pip install asyncpg"
+            ) from exc
+
+        pool = await asyncpg.create_pool(dsn, min_size=min_size, max_size=max_size)
+        instance = cls(
+            pool=pool,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+        await instance._ensure_table()
+        return instance
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    async def _ensure_table(self) -> None:
+        """Create the conversation table if it does not exist."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(self._CREATE_TABLE_SQL)
+
+    # ------------------------------------------------------------------
+    # MemoryBackend interface
+    # ------------------------------------------------------------------
+
+    @property
+    def messages(self) -> list[dict[str, Any]]:
+        """Synchronous property required by MemoryBackend.
+
+        .. note::
+            This performs a blocking database fetch via
+            :meth:`asyncio.get_event_loop().run_until_complete`.  In
+            async contexts, prefer awaiting :meth:`async_messages` directly.
+        """
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(self.async_messages())
+
+    async def async_messages(self) -> list[dict[str, Any]]:
+        """Async variant of :attr:`messages`; use this inside async code."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT message_data
+                  FROM agentapi_conversations
+                 WHERE conversation_id = $1
+                 ORDER BY id ASC
+                """,
+                self.conversation_id,
+            )
+        return [json.loads(row["message_data"]) for row in rows]
+
+    def add(self, message: dict[str, Any]) -> None:
+        """Synchronous add required by MemoryBackend.
+
+        Delegates to :meth:`async_add` via the event loop.
+        """
+        import asyncio
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self.async_add(message))
+
+    async def async_add(self, message: dict[str, Any]) -> None:
+        """Async variant of :meth:`add`; use this inside async code."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO agentapi_conversations
+                    (conversation_id, user_id, tenant_id, message_data)
+                VALUES ($1, $2, $3, $4::jsonb)
+                """,
+                self.conversation_id,
+                self.user_id,
+                self.tenant_id,
+                json.dumps(message),
+            )
+
+    def reset(self) -> None:
+        """Synchronous reset required by MemoryBackend.
+
+        Delegates to :meth:`async_reset` via the event loop.
+        """
+        import asyncio
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self.async_reset())
+
+    async def async_reset(self) -> None:
+        """Async variant of :meth:`reset`; use this inside async code."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM agentapi_conversations WHERE conversation_id = $1",
+                self.conversation_id,
+            )
+
+    async def close(self) -> None:
+        """Close the underlying connection pool.
+
+        Call this when the application shuts down to release database
+        connections cleanly.
+        """
+        await self._pool.close()
