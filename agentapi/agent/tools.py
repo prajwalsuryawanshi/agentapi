@@ -6,7 +6,7 @@ import json
 import types
 from dataclasses import dataclass
 from typing import Any, get_args, get_origin
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from agentapi.errors import AgentProviderError
 
 @dataclass
@@ -30,7 +30,37 @@ _TYPE_MAP: dict[Any, str] = {
 }
 
 
+def _unwrap_annotated(annotation: Any) -> Any:
+    """Recursively unwrap Annotated annotations."""
+    origin = get_origin(annotation)
+    if origin is not None and str(origin).startswith("typing.Annotated"):
+        args = get_args(annotation)
+        if args:
+            return _unwrap_annotated(args[0])
+    return annotation
+
+
+def has_explicit_default(param: inspect.Parameter) -> bool:
+    """Check if the parameter has an explicit python default value."""
+    return param.default is not inspect._empty
+
+
+def resolve_parameter_default(param: inspect.Parameter) -> Any:
+    """Resolve the default value of a parameter, if one exists."""
+    return param.default
+
+
 def _json_type(annotation: Any) -> str | list[str]:
+    annotation = _unwrap_annotated(annotation)
+    
+    # Check if annotation is a subclass of BaseModel
+    try:
+        from pydantic import BaseModel
+        if inspect.isclass(annotation) and issubclass(annotation, BaseModel):
+            return "object"
+    except ImportError:
+        pass
+
     origin = get_origin(annotation)
     if origin is None:
         return _TYPE_MAP.get(annotation, "string")
@@ -62,6 +92,95 @@ def _json_type(annotation: Any) -> str | list[str]:
     return "string"
 
 
+def _adjust_schema_for_strict(schema: dict[str, Any], strict: bool = True) -> dict[str, Any]:
+    """Recursively adjust schema to comply with OpenAI strict mode requirements."""
+    if not isinstance(schema, dict):
+        return schema
+
+    result = dict(schema)
+
+    schema_type = result.get("type")
+    if schema_type == "object" or "properties" in result:
+        props = result.get("properties", {})
+        if props:
+            adjusted_props = {
+                k: _adjust_schema_for_strict(v, strict=strict) for k, v in props.items()
+            }
+            result["properties"] = adjusted_props
+
+            if strict:
+                result["additionalProperties"] = False
+                result["required"] = list(props.keys())
+
+                for prop_name, prop_schema in adjusted_props.items():
+                    if "default" in prop_schema:
+                        ptype = prop_schema.get("type")
+                        if ptype and not isinstance(ptype, list):
+                            prop_schema["type"] = [ptype, "null"]
+                        elif ptype and isinstance(ptype, list) and "null" not in ptype:
+                            prop_schema["type"] = [*ptype, "null"]
+        else:
+            if strict:
+                result["additionalProperties"] = False
+                result["required"] = []
+
+    if "items" in result:
+        if isinstance(result["items"], dict):
+            result["items"] = _adjust_schema_for_strict(result["items"], strict=strict)
+        elif isinstance(result["items"], list):
+            result["items"] = [_adjust_schema_for_strict(item, strict=strict) for item in result["items"]]
+
+    return result
+
+
+def _resolve_param_schema(annotation: Any, strict: bool = True) -> dict[str, Any]:
+    """Resolve schema for a single parameter annotation."""
+    annotation = _unwrap_annotated(annotation)
+
+    # Check for Pydantic BaseModel subclass
+    try:
+        from pydantic import BaseModel
+        if inspect.isclass(annotation) and issubclass(annotation, BaseModel):
+            schema = annotation.model_json_schema()
+            return _adjust_schema_for_strict(schema, strict=strict)
+    except ImportError:
+        pass
+
+    origin = get_origin(annotation)
+    if origin is list or origin is Sequence:
+        args = get_args(annotation)
+        item_schema = {"type": "string"}
+        if args:
+            item_schema = _resolve_param_schema(args[0], strict=strict)
+        return {
+            "type": "array",
+            "items": item_schema,
+        }
+
+    if origin is dict:
+        return {
+            "type": "object",
+        }
+
+    if origin in (types.UnionType, getattr(types, "UnionType", object)) or str(origin) == "typing.Union":
+        args = get_args(annotation)
+        non_none = [arg for arg in args if arg is not type(None)]
+        if len(non_none) == 1:
+            base_schema = _resolve_param_schema(non_none[0], strict=strict)
+            base_type = base_schema.get("type", "string")
+            if isinstance(base_type, list):
+                if "null" not in base_type:
+                    base_schema["type"] = [*base_type, "null"]
+            else:
+                base_schema["type"] = [base_type, "null"]
+            return base_schema
+        elif len(non_none) > 1:
+            return _resolve_param_schema(non_none[0], strict=strict)
+
+    param_type = _json_type(annotation)
+    return {"type": param_type}
+
+
 def _compose_tool_description(
     func: Callable[..., Any],
     *,
@@ -83,6 +202,7 @@ def _build_openai_tool_schema(
     description: str | None = None,
     context: str | None = None,
     name: str | None = None,
+    strict: bool = True,
 ) -> dict[str, Any]:
     signature = inspect.signature(func)
     properties: dict[str, Any] = {}
@@ -93,32 +213,68 @@ def _build_openai_tool_schema(
         if annotation is inspect._empty:
             annotation = str
 
-        param_type = _json_type(annotation)
-        if param.default is not inspect._empty and not isinstance(param_type, list):
-            param_type = [param_type, "null"]
+        param_schema = _resolve_param_schema(annotation, strict=strict)
 
-        properties[param_name] = {
-            "type": param_type,
-            "description": f"Parameter: {param_name}",
-        }
+        if strict:
+            param_type = param_schema.get("type", "string")
+            if param.default is not inspect._empty:
+                if isinstance(param_type, list):
+                    if "null" not in param_type:
+                        param_schema["type"] = [*param_type, "null"]
+                else:
+                    param_schema["type"] = [param_type, "null"]
 
-        # Strict mode expects required to include all declared properties.
-        required.append(param_name)
+                try:
+                    from pydantic import BaseModel
+                    if isinstance(param.default, BaseModel):
+                        param_schema["default"] = param.default.model_dump()
+                    else:
+                        param_schema["default"] = param.default
+                except ImportError:
+                    param_schema["default"] = param.default
+            
+            param_schema["description"] = f"Parameter: {param_name}"
+            properties[param_name] = param_schema
+            required.append(param_name)
+        else:
+            if param.default is not inspect._empty:
+                try:
+                    from pydantic import BaseModel
+                    if isinstance(param.default, BaseModel):
+                        param_schema["default"] = param.default.model_dump()
+                    else:
+                        param_schema["default"] = param.default
+                except ImportError:
+                    param_schema["default"] = param.default
+            else:
+                required.append(param_name)
 
-    return {
+            param_schema["description"] = f"Parameter: {param_name}"
+            properties[param_name] = param_schema
+
+    schema = {
         "type": "function",
         "function": {
             "name": (name or func.__name__).strip(),
             "description": _compose_tool_description(func, description=description, context=context),
-            "strict": True,
             "parameters": {
                 "type": "object",
                 "properties": properties,
-                "required": required,
-                "additionalProperties": False,
             },
         },
     }
+
+    if strict:
+        schema["function"]["strict"] = True
+        schema["function"]["parameters"]["required"] = required
+        schema["function"]["parameters"]["additionalProperties"] = False
+    else:
+        schema["function"]["strict"] = False
+        schema["function"]["parameters"]["additionalProperties"] = True
+        if required:
+            schema["function"]["parameters"]["required"] = required
+
+    return schema
 
 
 def tool(
@@ -127,6 +283,7 @@ def tool(
     name: str | None = None,
     description: str | None = None,
     context: str | None = None,
+    strict: bool = True,
 ) -> Callable[..., Any]:
     """Decorator that tags a Python function as an AgentAPI tool.
 
@@ -149,6 +306,7 @@ def tool(
                 description=description,
                 context=context,
                 name=tool_name,
+                strict=strict,
             ),
         )
         return target

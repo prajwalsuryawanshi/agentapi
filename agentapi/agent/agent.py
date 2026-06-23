@@ -9,7 +9,14 @@ from typing import Any, AsyncIterator, Callable
 from fastapi.responses import StreamingResponse
 
 from agentapi.agent.memory import InMemoryMemory, MemoryBackend
-from agentapi.agent.tools import ToolDefinition, parse_tool_args, to_tool_definition
+from agentapi.agent.tools import (
+    ToolDefinition,
+    parse_tool_args,
+    to_tool_definition,
+    has_explicit_default,
+    resolve_parameter_default,
+    _unwrap_annotated,
+)
 from agentapi.config.settings import get_settings
 from agentapi.errors import AgentConfigurationError
 from agentapi.providers.base import BaseProvider, ToolCall
@@ -20,6 +27,87 @@ from agentapi.providers.openrouter import OpenRouterProvider
 logger = logging.getLogger(__name__)
 
 ProviderFactory = Callable[["Agent", Any, str], BaseProvider]
+
+
+def _resolve_defaults_recursive(annotation: Any, val: Any) -> Any:
+    from typing import get_origin, get_args
+    import types
+    import collections.abc
+
+    annotation = _unwrap_annotated(annotation)
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+
+    if origin is not None:
+        # Union/Optional
+        if origin in (types.UnionType, getattr(types, "UnionType", object)) or str(origin) == "typing.Union":
+            if val is None:
+                return None
+            for arg in args:
+                if arg is not type(None):
+                    try:
+                        resolved = _resolve_defaults_recursive(arg, val)
+                        if resolved is not val:
+                            return resolved
+                    except Exception:
+                        pass
+            # Fallback to first non-None arg that doesn't raise an exception
+            for arg in args:
+                if arg is not type(None):
+                    try:
+                        return _resolve_defaults_recursive(arg, val)
+                    except Exception:
+                        pass
+            return val
+
+        # list, Sequence, tuple, set
+        if origin in (list, collections.abc.Sequence, tuple, set):
+            if isinstance(val, (list, tuple, set)):
+                inner_annotation = args[0] if args else Any
+                resolved_list = [
+                    _resolve_defaults_recursive(inner_annotation, item) for item in val
+                ]
+                if origin is tuple:
+                    return tuple(resolved_list)
+                if origin is set:
+                    return set(resolved_list)
+                return resolved_list
+            return val
+
+        # dict, Mapping
+        if origin in (dict, collections.abc.Mapping):
+            if isinstance(val, dict):
+                key_annotation = args[0] if len(args) > 0 else Any
+                val_annotation = args[1] if len(args) > 1 else Any
+                resolved_dict = {}
+                for k, v in val.items():
+                    resolved_k = _resolve_defaults_recursive(key_annotation, k)
+                    resolved_v = _resolve_defaults_recursive(val_annotation, v)
+                    resolved_dict[resolved_k] = resolved_v
+                return resolved_dict
+            return val
+
+    try:
+        from pydantic import BaseModel
+        if inspect.isclass(annotation) and issubclass(annotation, BaseModel):
+            if isinstance(val, dict):
+                resolved_dict = {}
+                for field_name, field_info in annotation.model_fields.items():
+                    field_val = val.get(field_name)
+                    if field_val is not None:
+                        resolved_dict[field_name] = _resolve_defaults_recursive(field_info.annotation, field_val)
+                    else:
+                        if field_name in val:
+                            if not field_info.is_required():
+                                pass
+                            else:
+                                resolved_dict[field_name] = None
+                return annotation(**resolved_dict)
+            elif isinstance(val, annotation):
+                return val
+    except ImportError:
+        pass
+    return val
 
 
 class AgentAPIUsageError(Exception):
@@ -282,6 +370,7 @@ class Agent:
             return None
         return [tool.schema for tool in self._tools.values()]
 
+
     async def _execute_tool_calls(self, calls: list[ToolCall], conversation_messages: list[dict[str, Any]]) -> None:
         for call in calls:
             tool_def = self._tools.get(call.name)
@@ -298,6 +387,24 @@ class Agent:
 
             try:
                 args = parse_tool_args(call.arguments)
+
+                # Resolve default values if they are None/null and convert Pydantic models
+                sig = inspect.signature(tool_def.func)
+                for param_name, param in sig.parameters.items():
+                    if param.kind in (
+                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                        inspect.Parameter.KEYWORD_ONLY,
+                        inspect.Parameter.POSITIONAL_ONLY,
+                    ):
+                        val = args.get(param_name)
+                        if has_explicit_default(param) and val is None:
+                            args[param_name] = resolve_parameter_default(param)
+
+                        # Apply recursive Pydantic model resolution/instantiation
+                        val = args.get(param_name)
+                        if val is not None:
+                            args[param_name] = _resolve_defaults_recursive(param.annotation, val)
+
                 result = tool_def.func(**args)
                 if inspect.isawaitable(result):
                     result = await result
