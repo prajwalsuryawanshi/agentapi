@@ -253,6 +253,23 @@ AgentAPI converts common runtime issues into clear API-level errors:
 - Upstream provider failures -> provider error message with status context.
 - Streaming endpoints emit SSE error events instead of hard crashes.
 
+### Redacting sensitive data from errors
+
+By default, AgentAPI redacts common secret patterns from exception text before it reaches the client — both in JSON error responses and SSE error events. This catches the case where an upstream provider exception accidentally contains an API key, bearer token, or credential URL.
+
+```python
+app = AgentAPI(
+    error_redaction=True,            # default; set False to disable
+    error_redaction_patterns=[       # additive — extends the defaults
+        r"COMPANY-SECRET-[A-Z0-9]+",
+    ],
+)
+```
+
+Default patterns cover OpenAI (`sk-`), Anthropic (`sk-ant-`), Groq (`gsk_`), Google AI Studio (`AIza`), `Bearer` tokens, and URLs with embedded credentials. User-supplied patterns are *additive* to the defaults, so adding your own can't accidentally weaken the built-in protection. Matches are replaced with `[REDACTED]`.
+
+You can opt out with `error_redaction=False` if you need raw error text — for example, during local debugging — but the default is on so production deployments are safe by default.
+
 ## Examples & docs
 
 See `examples/` for runnable examples and `docs/` for the memory abstraction guide and orchestration notes. Key example:

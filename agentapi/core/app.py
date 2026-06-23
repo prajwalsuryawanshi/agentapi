@@ -1,6 +1,7 @@
 """FastAPI wrapper with chat and stream decorators."""
 
 from __future__ import annotations
+from agentapi.core.redaction import DEFAULT_PATTERNS, redact_exception
 
 import inspect
 import asyncio
@@ -56,6 +57,31 @@ class AgentAPI(FastAPI):
         self._sse_chunk_size = sse_chunk_size
         self._sse_heartbeat_seconds = sse_heartbeat_seconds
 
+        # Extract AgentAPI-specific kwargs before they reach FastAPI's __init__
+        error_redaction = kwargs.pop("error_redaction", True)
+        error_redaction_patterns = kwargs.pop("error_redaction_patterns", None)
+        
+        if not isinstance(error_redaction, bool):
+            raise TypeError(
+                f"error_redaction must be a bool, got {type(error_redaction).__name__}. "
+                f"To disable redaction, use error_redaction=False."
+            )
+        if error_redaction_patterns is not None:
+            if isinstance(error_redaction_patterns, str):
+                raise TypeError(
+                    "error_redaction_patterns must be a list of regex strings, not a single string. "
+                    "Wrap your pattern in a list: error_redaction_patterns=[pattern]"
+                )
+            if not isinstance(error_redaction_patterns, (list, tuple)):
+                raise TypeError(
+                    "error_redaction_patterns must be a list or tuple of regex strings, "
+                    f"got {type(error_redaction_patterns).__name__}"
+                )
+            if not all(isinstance(p, str) for p in error_redaction_patterns):
+                raise TypeError(
+                    "error_redaction_patterns must contain only strings"
+                )
+        
         kwargs.setdefault("title", "AgentAPI")
         kwargs.setdefault("description", "AgentAPI application")
         kwargs.setdefault("version", "0.1.0")
@@ -89,6 +115,13 @@ class AgentAPI(FastAPI):
         self._agentapi_favicon_file = assets_dir / "agentapi-favicon.png"
         self._agentapi_logo_path = "/agentapi-logo.png"
         self._agentapi_favicon_path = "/agentapi-favicon.png"
+        
+        self._error_redaction = error_redaction
+        if error_redaction_patterns is None:
+            self._error_redaction_patterns: list[str] = list(DEFAULT_PATTERNS)
+        else:
+            # Additive: user patterns extend the defaults rather than replace them
+            self._error_redaction_patterns = list(DEFAULT_PATTERNS) + list(error_redaction_patterns)
 
         self.openapi = self._custom_openapi
 
@@ -284,6 +317,26 @@ window.addEventListener('load', function () {
 """
         return HTMLResponse(html.replace("</head>", f"{inject}</head>"))
 
+    def _safe_exc_text(self, exc: BaseException) -> str:
+        """Return exception text with sensitive-data redaction applied if enabled."""
+        if not self._error_redaction:
+            return self._safe_exc_text_no_redact(exc)
+        return redact_exception(exc, patterns=self._error_redaction_patterns)
+
+    def _safe_exc_text_no_redact(self, exc: BaseException) -> str:
+        """Return exception text without any redaction."""
+        return str(exc)
+    
+    def _safe_sse_payload(self, text: str) -> str:
+        """Make text safe for an SSE data: line by collapsing CR/LF to spaces.
+
+        SSE uses \\n as a field separator within an event and \\n\\n as the
+        event terminator. A payload containing newlines lets a caller break
+        framing and inject fake event/data fields. Collapsing them preserves
+        the message while protecting the protocol.
+        """
+        return text.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+
     async def _invoke_handler(self, func: F, *args: Any, **kwargs: Any) -> Any:
         result = func(*args, **kwargs)
         if inspect.isawaitable(result):
@@ -314,9 +367,9 @@ window.addEventListener('load', function () {
                         async for chunk in self._iter_token_chunks(str(token)):
                             yield f"data: {chunk}\n\n"
                 except AgentConfigurationError as exc:
-                    yield f"event: error\ndata: {exc}\n\n"
+                    yield f"event: error\ndata: {self._safe_sse_payload(self._safe_exc_text(exc))}\n\n"
                 except AgentProviderError as exc:
-                    yield f"event: error\ndata: {exc}\n\n"
+                    yield f"event: error\ndata: {self._safe_sse_payload(self._safe_exc_text(exc))}\n\n"
                 yield "data: [DONE]\n\n"
                 return
 
@@ -331,9 +384,9 @@ window.addEventListener('load', function () {
                     async for token in stream:
                         await queue.put(("data", token))
                 except (AgentConfigurationError, AgentProviderError) as exc:
-                    await queue.put(("error", str(exc)))
+                    await queue.put(("error", self._safe_exc_text(exc)))
                 except Exception as exc:  # noqa: BLE001
-                    await queue.put(("error", f"Internal error: {exc}"))
+                    await queue.put(("error", self._safe_exc_text(exc)))
                 finally:
                     await queue.put(("done", None))
 
@@ -352,7 +405,7 @@ window.addEventListener('load', function () {
                         yield "data: [DONE]\n\n"
                         return
                     if kind == "error":
-                        yield f"event: error\ndata: {payload}\n\n"
+                        yield f"event: error\ndata: {self._safe_sse_payload(payload)}\n\n"
                         continue
                     # kind == "data"
                     async for chunk in self._iter_token_chunks(str(payload)):
@@ -390,9 +443,9 @@ window.addEventListener('load', function () {
                         return self._to_sse_response(result)
                     return result
                 except AgentConfigurationError as exc:
-                    return JSONResponse({"error": str(exc)}, status_code=500)
+                    return JSONResponse({"error": self._safe_exc_text(exc)}, status_code=500)
                 except AgentProviderError as exc:
-                    return JSONResponse({"error": str(exc)}, status_code=exc.status_code)
+                    return JSONResponse({"error": self._safe_exc_text(exc)}, status_code=exc.status_code)
 
             setattr(endpoint, "__signature__", signature)
 
@@ -416,9 +469,9 @@ window.addEventListener('load', function () {
                 try:
                     result = await self._invoke_handler(func, *args, **inner_kwargs)
                 except AgentConfigurationError as exc:
-                    return JSONResponse({"error": str(exc)}, status_code=500)
+                    return JSONResponse({"error": self._safe_exc_text(exc)}, status_code=500)
                 except AgentProviderError as exc:
-                    return JSONResponse({"error": str(exc)}, status_code=exc.status_code)
+                    return JSONResponse({"error": self._safe_exc_text(exc)}, status_code=exc.status_code)
 
                 if not hasattr(result, "__aiter__"):
                     raise TypeError("@app.stream handlers must return an async iterator")
