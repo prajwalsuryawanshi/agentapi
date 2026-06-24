@@ -176,14 +176,35 @@ def to_tool_definition(func: Callable[..., Any]) -> ToolDefinition:
     )
 
 
-def parse_tool_args(args_json: str) -> dict[str, Any]:
-    """Parse model tool arguments safely."""
-    if not args_json.strip():
+def parse_tool_args(args_json: str | dict[str, Any] | None) -> dict[str, Any]:
+    """Parse model tool arguments safely.
+
+    Accepts:
+      - str  : JSON-encoded arguments (original behaviour)
+      - dict : already-parsed arguments, returned as-is
+      - None : treated as empty arguments, returns {}
+
+    Raises:
+      - AgentProviderError if a string is provided but is not valid JSON
+      - TypeError if the input is an unsupported type
+    """
+    if args_json is None:
         return {}
-    try:
-        return json.loads(args_json)
-    except json.JSONDecodeError as exc:
-        raise AgentProviderError(
-            f"Failed to parse tool arguments as JSON: {exc}. Raw input: {args_json[:200]!r}",
-            status_code=422,
-        ) from exc
+
+    if isinstance(args_json, dict):
+        return args_json
+
+    if isinstance(args_json, str):
+        if not args_json.strip():
+            return {}
+        try:
+            return json.loads(args_json)
+        except json.JSONDecodeError as exc:
+            raise AgentProviderError(
+                f"Failed to parse tool arguments as JSON: {exc}. Raw input: {args_json[:200]!r}",
+                status_code=422,
+            ) from exc
+
+    raise TypeError(
+        f"parse_tool_args expected str, dict, or None, got {type(args_json).__name__!r}"
+    )
