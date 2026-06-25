@@ -1,3 +1,5 @@
 User-agent: *
 Allow: /
+
 Sitemap: https://agentapi.prajwalsuryawanshi.in/sitemap.xml
+Sitemap: https://agentapi.prajwalsuryawanshi.in/sitemap.xml.gz
