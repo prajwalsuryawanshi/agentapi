@@ -101,14 +101,12 @@ class OpenAICompatibleProvider(BaseProvider):
                 detail = exc.response.text.strip()[:500]
                 raise AgentProviderError(
                     f"Provider request failed ({exc.response.status_code}) for model '{self.model}'. "
-                    f"Response: {detail}",
-                    status_code=exc.response.status_code,
-                ) from exc
+                    f"Response: {detail}"
+                ) from None
             except httpx.RequestError as exc:
                 raise AgentProviderError(
-                    f"Provider network error for model '{self.model}': {exc}",
-                    status_code=502,
-                ) from exc
+                    f"Provider network error for model '{self.model}': {type(exc).__name__}"
+                ) from None
 
         message = self._extract_message(data)
         raw_tool_calls = message.get("tool_calls") or []
@@ -184,14 +182,12 @@ class OpenAICompatibleProvider(BaseProvider):
                 detail = await self._safe_error_detail(exc.response)
                 raise AgentProviderError(
                     f"Provider stream request failed ({exc.response.status_code}) for model '{self.model}'. "
-                    f"Response: {detail}",
-                    status_code=exc.response.status_code,
-                ) from exc
+                    f"Response: {detail}"
+                ) from None
             except httpx.RequestError as exc:
                 raise AgentProviderError(
-                    f"Provider stream network error for model '{self.model}': {exc}",
-                    status_code=502,
-                ) from exc
+                    f"Provider stream network error for model '{self.model}': {type(exc).__name__}"
+                ) from None
 
     async def _safe_error_detail(self, response: httpx.Response) -> str:
         try:

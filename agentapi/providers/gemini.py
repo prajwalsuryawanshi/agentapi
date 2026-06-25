@@ -36,18 +36,17 @@ class GeminiProvider(BaseProvider):
             try:
                 response = await client.post(
                     f"{self.base_url}/models/{self.model}:generateContent",
-                    params={"key": self.api_key},
+                    headers={"x-goog-api-key": self.api_key},
                     json=payload,
                 )
                 response.raise_for_status()
                 data = response.json()
             except httpx.HTTPStatusError as exc:
-                raise self._map_http_status_error(exc) from exc
+                raise self._map_http_status_error(exc) from None
             except httpx.RequestError as exc:
                 raise AgentProviderError(
-                    f"Gemini network error for model '{self.model}': {exc}",
-                    status_code=502,
-                ) from exc
+                    f"Gemini network error for model '{self.model}': {type(exc).__name__}"
+                ) from None
 
         content = self._extract_text(data)
         tool_calls = self._extract_tool_calls(data)
@@ -68,7 +67,8 @@ class GeminiProvider(BaseProvider):
                 async with client.stream(
                     "POST",
                     f"{self.base_url}/models/{self.model}:streamGenerateContent",
-                    params={"alt": "sse", "key": self.api_key},
+                    params={"alt": "sse"},
+                    headers={"x-goog-api-key": self.api_key},
                     json=payload,
                 ) as response:
                     response.raise_for_status()
@@ -101,12 +101,11 @@ class GeminiProvider(BaseProvider):
                             yield token
             except httpx.HTTPStatusError as exc:
                 detail = await self._safe_error_detail(exc.response)
-                raise self._map_http_status_error(exc, detail=detail) from exc
+                raise self._map_http_status_error(exc, detail=detail) from None
             except httpx.RequestError as exc:
                 raise AgentProviderError(
-                    f"Gemini stream network error for model '{self.model}': {exc}",
-                    status_code=502,
-                ) from exc
+                    f"Gemini stream network error for model '{self.model}': {type(exc).__name__}"
+                ) from None
 
     def _map_http_status_error(
         self,
@@ -122,13 +121,11 @@ class GeminiProvider(BaseProvider):
             return AgentProviderError(
                 "Gemini model not found or unavailable for this API version/key. "
                 f"Tried model '{self.model}'. Try setting model='gemini-2.5-flash' or another available model. "
-                f"Response: {detail}",
-                status_code=404,
+                f"Response: {detail}"
             )
 
         return AgentProviderError(
-            f"Gemini request failed ({status}) for model '{self.model}'. Response: {detail}",
-            status_code=status,
+            f"Gemini request failed ({status}) for model '{self.model}'. Response: {detail}"
         )
 
     async def _safe_error_detail(self, response: httpx.Response) -> str:

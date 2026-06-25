@@ -4,6 +4,7 @@ import json
 from typing import Any, AsyncIterator
 from anthropic import AsyncAnthropic
 
+from agentapi.errors import AgentProviderError
 from agentapi.providers.base import BaseProvider, ProviderResponse, ToolCall
 
 class AnthropicProvider(BaseProvider):
@@ -58,7 +59,12 @@ class AnthropicProvider(BaseProvider):
         if formatted_tools:
             kwargs["tools"] = formatted_tools
             
-        response = await self.client.messages.create(**kwargs)
+        try:
+            response = await self.client.messages.create(**kwargs)
+        except Exception as exc:
+            raise AgentProviderError(
+                f"Anthropic provider error for model '{self.model}': {type(exc).__name__}"
+            ) from None
         
         content = ""
         tool_calls = []
@@ -85,6 +91,11 @@ class AnthropicProvider(BaseProvider):
             "max_tokens": 4096,
         }
         
-        async with self.client.messages.stream(**kwargs) as stream:
-            async for text in stream.text_stream:
-                yield text
+        try:
+            async with self.client.messages.stream(**kwargs) as stream:
+                async for text in stream.text_stream:
+                    yield text
+        except Exception as exc:
+            raise AgentProviderError(
+                f"Anthropic stream provider error for model '{self.model}': {type(exc).__name__}"
+            ) from None

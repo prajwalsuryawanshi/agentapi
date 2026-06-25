@@ -184,6 +184,5 @@ def parse_tool_args(args_json: str) -> dict[str, Any]:
         return json.loads(args_json)
     except json.JSONDecodeError as exc:
         raise AgentProviderError(
-            f"Failed to parse tool arguments as JSON: {exc}. Raw input: {args_json[:200]!r}",
-            status_code=422,
+            f"Failed to parse tool arguments as JSON: {exc}. Raw input: {args_json[:200]!r}"
         ) from exc
