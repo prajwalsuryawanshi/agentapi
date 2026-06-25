@@ -2,7 +2,7 @@
 
 import json
 from typing import Any, AsyncIterator
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropic, APIStatusError, APIConnectionError, APITimeoutError
 
 from agentapi.errors import AgentProviderError
 from agentapi.providers.base import BaseProvider, ProviderResponse, ToolCall
@@ -63,10 +63,15 @@ class AnthropicProvider(BaseProvider):
             
         try:
             response = await self.client.messages.create(**kwargs)
-        except Exception as exc:
+        except APIStatusError as exc:
             raise AgentProviderError(
                 f"Anthropic provider error for model '{self.model}': {type(exc).__name__}",
-                status_code=getattr(exc, "status_code", 502)
+                status_code=exc.status_code
+            ) from None
+        except (APIConnectionError, APITimeoutError) as exc:
+            raise AgentProviderError(
+                f"Anthropic provider error for model '{self.model}': {type(exc).__name__}",
+                status_code=502
             ) from None
         
         content = ""
@@ -99,8 +104,13 @@ class AnthropicProvider(BaseProvider):
             async with self.client.messages.stream(**kwargs) as stream:
                 async for text in stream.text_stream:
                     yield text
-        except Exception as exc:
+        except APIStatusError as exc:
             raise AgentProviderError(
                 f"Anthropic stream provider error for model '{self.model}': {type(exc).__name__}",
-                status_code=getattr(exc, "status_code", 502)
+                status_code=exc.status_code
+            ) from None
+        except (APIConnectionError, APITimeoutError) as exc:
+            raise AgentProviderError(
+                f"Anthropic stream provider error for model '{self.model}': {type(exc).__name__}",
+                status_code=502
             ) from None

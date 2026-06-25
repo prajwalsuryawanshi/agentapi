@@ -284,11 +284,16 @@ class GeminiProvider(BaseProvider):
             function_schema = tool.get("function")
             if not function_schema:
                 continue
+            # Gemini's function-calling schema doesn't support OpenAI-only keys
+            # like "additionalProperties" — sending it causes a MALFORMED_FUNCTION_CALL
+            # error from the API. Strip it before building the declaration.
+            parameters = dict(function_schema.get("parameters") or {"type": "object", "properties": {}})
+            parameters.pop("additionalProperties", None)
 
             declaration = {
                 "name": function_schema.get("name", ""),
                 "description": function_schema.get("description", ""),
-                "parameters": function_schema.get("parameters", {"type": "object", "properties": {}}),
+                "parameters": parameters,
             }
             declarations.append(declaration)
 
