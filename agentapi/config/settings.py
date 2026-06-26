@@ -6,11 +6,15 @@ import os
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
+from enum import Enum
 
 
 load_dotenv()
 
-SUPPORTED_PROVIDERS = ("openai", "gemini", "openrouter")
+class Provider(str, Enum):
+    OPENAI = "openai"
+    GEMINI = "gemini"
+    OPENROUTER = "openrouter"
 
 
 @dataclass(frozen=True)
@@ -26,12 +30,14 @@ class Settings:
         """Validate the default provider at initialization time."""
         provider = (self.default_provider or "").lower()
 
-        if provider not in SUPPORTED_PROVIDERS:
-            supported = ", ".join(SUPPORTED_PROVIDERS)
+        try:
+            provider = Provider(provider).value
+        except ValueError:
+            supported = ", ".join(p.value for p in Provider)
             raise ValueError(
                 f"Invalid default_provider: {self.default_provider!r}. "
                 f"Expected one of: {supported}."
-            )
+            ) from None
 
         object.__setattr__(self, "default_provider", provider)
 
