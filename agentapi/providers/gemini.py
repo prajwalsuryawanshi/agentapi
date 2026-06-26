@@ -47,8 +47,7 @@ class GeminiProvider(BaseProvider):
                 raise self._map_http_status_error(exc) from None
             except httpx.RequestError as exc:
                 raise AgentProviderError(
-                    f"Gemini network error for model '{self.model}': {type(exc).__name__}",
-                    status_code=502,
+                    f"Gemini network error for model '{self.model}': {type(exc).__name__}"
                 ) from None
 
         content = self._extract_text(data)
@@ -108,8 +107,7 @@ class GeminiProvider(BaseProvider):
                 raise self._map_http_status_error(exc, detail=detail) from None
             except httpx.RequestError as exc:
                 raise AgentProviderError(
-                    f"Gemini stream network error for model '{self.model}': {type(exc).__name__}",
-                    status_code=502,
+                    f"Gemini stream network error for model '{self.model}': {type(exc).__name__}"
                 ) from None
 
     def _map_http_status_error(

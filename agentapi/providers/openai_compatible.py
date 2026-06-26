@@ -47,27 +47,23 @@ class OpenAICompatibleProvider(BaseProvider):
         if not isinstance(choices, list):
             raise AgentProviderError(
                 f"Provider returned a non-list 'choices' field for model '{self.model}'. "
-                f"Raw response: {str(data)[:200]}",
-                status_code=502,
+                f"Raw response: {str(data)[:200]}"
             )
         if not choices:
             raise AgentProviderError(
                 f"Provider returned an empty 'choices' list for model '{self.model}'. "
-                f"Raw response: {str(data)[:200]}",
-                status_code=502,
+                f"Raw response: {str(data)[:200]}"
             )
         if not isinstance(choices[0], dict):
             raise AgentProviderError(
                 f"Provider returned a non-dict entry at 'choices[0]' for model '{self.model}'. "
-                f"Got: {type(choices[0]).__name__}",
-                status_code=502,
+                f"Got: {type(choices[0]).__name__}"
             )
 
         message = choices[0].get("message")
         if message is None:
             raise AgentProviderError(
-                f"Provider returned a 'choices[0]' entry with no 'message' field for model '{self.model}'.",
-                status_code=502,
+                f"Provider returned a 'choices[0]' entry with no 'message' field for model '{self.model}'."
             )
         return message
 
@@ -104,13 +100,11 @@ class OpenAICompatibleProvider(BaseProvider):
                 detail = exc.response.text.strip()[:500]
                 raise AgentProviderError(
                     f"Provider request failed ({exc.response.status_code}) for model '{self.model}'. "
-                    f"Response: {detail}",
-                    status_code=exc.response.status_code,
+                    f"Response: {detail}"
                 ) from None
             except httpx.RequestError as exc:
                 raise AgentProviderError(
-                    f"Provider network error for model '{self.model}': {type(exc).__name__}",
-                    status_code=502,
+                    f"Provider network error for model '{self.model}': {type(exc).__name__}"
                 ) from None
 
         message = self._extract_message(data)
@@ -188,13 +182,11 @@ class OpenAICompatibleProvider(BaseProvider):
                 detail = await self._safe_error_detail(exc.response)
                 raise AgentProviderError(
                     f"Provider stream request failed ({exc.response.status_code}) for model '{self.model}'. "
-                    f"Response: {detail}",
-                    status_code=exc.response.status_code,
+                    f"Response: {detail}"
                 ) from None
             except httpx.RequestError as exc:
                 raise AgentProviderError(
-                    f"Provider stream network error for model '{self.model}': {type(exc).__name__}",
-                    status_code=502,
+                    f"Provider stream network error for model '{self.model}': {type(exc).__name__}"
                 ) from None
 
     async def _safe_error_detail(self, response: httpx.Response) -> str:

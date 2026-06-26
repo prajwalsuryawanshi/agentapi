@@ -65,13 +65,11 @@ class AnthropicProvider(BaseProvider):
             response = await self.client.messages.create(**kwargs)
         except APIStatusError as exc:
             raise AgentProviderError(
-                f"Anthropic provider error for model '{self.model}': {type(exc).__name__}",
-                status_code=exc.status_code
+                f"Anthropic provider error for model '{self.model}': {type(exc).__name__}"
             ) from None
         except (APIConnectionError, APITimeoutError) as exc:
             raise AgentProviderError(
-                f"Anthropic provider error for model '{self.model}': {type(exc).__name__}",
-                status_code=502
+                f"Anthropic provider error for model '{self.model}': {type(exc).__name__}"
             ) from None
         
         content = ""
@@ -106,11 +104,9 @@ class AnthropicProvider(BaseProvider):
                     yield text
         except APIStatusError as exc:
             raise AgentProviderError(
-                f"Anthropic stream provider error for model '{self.model}': {type(exc).__name__}",
-                status_code=exc.status_code
+                f"Anthropic stream provider error for model '{self.model}': {type(exc).__name__}"
             ) from None
         except (APIConnectionError, APITimeoutError) as exc:
             raise AgentProviderError(
-                f"Anthropic stream provider error for model '{self.model}': {type(exc).__name__}",
-                status_code=502
+                f"Anthropic stream provider error for model '{self.model}': {type(exc).__name__}"
             ) from None
