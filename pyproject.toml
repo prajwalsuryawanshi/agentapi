@@ -35,6 +35,13 @@ dependencies = [
 redis = [
   "redis>=5.0.0"
 ]
+mongo = [
+    "motor>=3.3.0"
+]
+all = [
+    "redis>=5.0.0",
+    "motor>=3.3.0"
+]
 
 [project.urls]
 Homepage = "https://github.com/prajwalsuryawanshi/agentapi"
