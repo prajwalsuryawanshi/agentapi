@@ -392,7 +392,7 @@ window.addEventListener('load', function () {
                 except AgentConfigurationError as exc:
                     return JSONResponse({"error": str(exc)}, status_code=500)
                 except AgentProviderError as exc:
-                    return JSONResponse({"error": str(exc)}, status_code=exc.status_code)
+                    return JSONResponse({"error": str(exc)}, status_code=502)
 
             setattr(endpoint, "__signature__", signature)
 
@@ -418,7 +418,7 @@ window.addEventListener('load', function () {
                 except AgentConfigurationError as exc:
                     return JSONResponse({"error": str(exc)}, status_code=500)
                 except AgentProviderError as exc:
-                    return JSONResponse({"error": str(exc)}, status_code=exc.status_code)
+                    return JSONResponse({"error": str(exc)}, status_code=502)
 
                 if not hasattr(result, "__aiter__"):
                     raise TypeError("@app.stream handlers must return an async iterator")

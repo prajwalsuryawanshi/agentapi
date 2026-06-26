@@ -127,13 +127,11 @@ class GeminiProvider(BaseProvider):
             return AgentProviderError(
                 "Gemini model not found or unavailable for this API version/key. "
                 f"Tried model '{self.model}'. Try setting model='gemini-2.5-flash' or another available model. "
-                f"Response: {detail}",
-                status_code=404,
+                f"Response: {detail}"
             )
 
         return AgentProviderError(
-            f"Gemini request failed ({status}) for model '{self.model}'. Response: {detail}",
-            status_code=status,
+            f"Gemini request failed ({status}) for model '{self.model}'. Response: {detail}"
         )
 
     async def _safe_error_detail(self, response: httpx.Response) -> str:

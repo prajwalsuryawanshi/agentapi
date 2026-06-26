@@ -1,0 +1,17 @@
+# AgentAPI Documentation
+
+AgentAPI is a lightweight Python framework for building agent backends with FastAPI-style ergonomics. It provides provider abstraction, tool calling, conversation memory, and streaming-first APIs.
+
+## Documentation Sections
+
+- [Home](index.md)
+- [Installation](installation.md)
+- [Getting Started](getting-started.md)
+- [Memory](memory.md)
+- [Providers](providers.md)
+- [Tool Calling](tools.md)
+- [Streaming](streaming.md)
+- [CLI](cli.md)
+- [API Reference](api-reference.md)
+- [Deployment](deployment.md)
+- [FAQ](faq.md)
