@@ -230,11 +230,10 @@ class Agent:
                 model=self.model,
             )
         if self.provider_name == "huggingface":
-            import os
             return HuggingFaceProvider(
                 api_key=self._require_api_key(settings.huggingface_api_key, "HUGGINGFACE_API_KEY"),
                 model=self.model,
-                base_url=os.getenv("HUGGINGFACE_BASE_URL"),
+                base_url=settings.huggingface_base_url,
             )
         if self.provider_name == "anthropic":
             from agentapi.providers.anthropic import AnthropicProvider
