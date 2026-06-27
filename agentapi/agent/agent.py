@@ -16,6 +16,7 @@ from agentapi.providers.base import BaseProvider, ToolCall
 from agentapi.providers.gemini import GeminiProvider
 from agentapi.providers.openai import OpenAIProvider
 from agentapi.providers.openrouter import OpenRouterProvider
+from agentapi.providers.huggingface import HuggingFaceProvider
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +229,12 @@ class Agent:
                 api_key=self._require_api_key(settings.openrouter_api_key, "OPENROUTER_API_KEY"),
                 model=self.model,
             )
+        if self.provider_name == "huggingface":
+            return HuggingFaceProvider(
+                api_key=self._require_api_key(settings.huggingface_api_key, "HUGGINGFACE_API_KEY"),
+                model=self.model,
+                base_url=settings.huggingface_base_url,
+            )
         if self.provider_name == "anthropic":
             from agentapi.providers.anthropic import AnthropicProvider
             import os
@@ -238,7 +245,7 @@ class Agent:
                 model=self.model,
             )
         raise ValueError(
-            "Unsupported provider. Use one of: openai, gemini, openrouter, anthropic or register a custom provider"
+            "Unsupported provider. Use one of: openai, gemini, openrouter, huggingface, anthropic or register a custom provider"
         )
 
     @classmethod
@@ -267,6 +274,8 @@ class Agent:
             return "gemini-2.5-flash"
         if provider_name == "anthropic":
             return "claude-3-5-sonnet-20241022"
+        if provider_name == "huggingface":
+            return "Qwen/Qwen2.5-72B-Instruct"
         return "gpt-4o-mini"
 
     def _default_tool_calling_for(self, provider_name: str) -> dict[str, Any]:

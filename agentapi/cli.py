@@ -15,7 +15,7 @@ TOOLS_TEMPLATE = '''from agentapi import tool\n\n\n@tool\ndef get_weather(city: 
 
 AGENTS_TEMPLATE = '''from agentapi import Agent\nfrom tools import get_weather\n\nassistant = Agent(\n    system_prompt="You are a helpful assistant",\n    provider="{provider}",\n    tools=[get_weather],\n)\n'''
 
-ENV_TEMPLATE = '''OPENAI_API_KEY=\nGEMINI_API_KEY=\nOPENROUTER_API_KEY=\nDEFAULT_PROVIDER={provider}\n'''
+ENV_TEMPLATE = '''OPENAI_API_KEY=\nGEMINI_API_KEY=\nOPENROUTER_API_KEY=\nHUGGINGFACE_API_KEY=\nDEFAULT_PROVIDER={provider}\n'''
 
 
 def _write_file(path: Path, content: str) -> None:
@@ -28,7 +28,7 @@ def _prompt_with_default(label: str, default: str) -> str:
 
 
 def _collect_new_project_config(args: argparse.Namespace) -> tuple[str, str]:
-    provider_choices = ["openai", "gemini", "openrouter"]
+    provider_choices = ["openai", "gemini", "openrouter", "huggingface"]
 
     project_name = args.project_name
     provider = args.provider.lower()
@@ -138,7 +138,7 @@ def build_parser() -> argparse.ArgumentParser:
     new_parser.add_argument(
         "--provider",
         default="openai",
-        choices=["openai", "gemini", "openrouter"],
+        choices=["openai", "gemini", "openrouter", "huggingface"],
         help="Default provider to scaffold in generated files",
     )
     new_parser.add_argument(

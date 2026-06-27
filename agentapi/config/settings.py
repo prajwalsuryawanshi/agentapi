@@ -15,6 +15,7 @@ class Provider(str, Enum):
     OPENAI = "openai"
     GEMINI = "gemini"
     OPENROUTER = "openrouter"
+    HUGGINGFACE = "huggingface"
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,8 @@ class Settings:
     openai_api_key: str | None
     gemini_api_key: str | None
     openrouter_api_key: str | None
+    huggingface_api_key: str | None
+    huggingface_base_url: str | None
     default_provider: str
 
     def __post_init__(self) -> None:
@@ -78,6 +81,11 @@ def get_settings() -> Settings:
             os.getenv("OPENROUTER_API_KEY"),
             "OpenRouter",
         ),
+        huggingface_api_key=_validate_api_key(
+            os.getenv("HUGGINGFACE_API_KEY"),
+            "HuggingFace",
+        ),
+        huggingface_base_url=os.getenv("HUGGINGFACE_BASE_URL"),
         default_provider=os.getenv(
             "DEFAULT_PROVIDER",
             "openai",
