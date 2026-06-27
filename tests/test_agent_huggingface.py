@@ -1,0 +1,23 @@
+"""Test Agent integration with Hugging Face provider."""
+
+from unittest.mock import AsyncMock, patch
+import pytest
+from agentapi import Agent
+from agentapi.providers.huggingface import HuggingFaceProvider
+
+
+@patch.dict("os.environ", {"HUGGINGFACE_API_KEY": "hf_test_token"})
+def test_agent_huggingface_initialization():
+    """Test that the agent initializes correctly with the huggingface provider."""
+    agent = Agent(
+        system_prompt="You are a helpful assistant",
+        provider="huggingface",
+    )
+    assert agent.provider_name == "huggingface"
+    assert agent.model == "Qwen/Qwen2.5-72B-Instruct"
+    
+    # Verify the instantiated provider is correct
+    provider = agent._get_provider()
+    assert isinstance(provider, HuggingFaceProvider)
+    assert provider.api_key == "hf_test_token"
+    assert provider.model == "Qwen/Qwen2.5-72B-Instruct"
