@@ -96,5 +96,68 @@ def test_invalid_uuid_raises_error():
         InMemoryMemory(conversation_id="not-a-valid-uuid")
 
 
+def test_ttl_disabled_keeps_messages():
+    """Messages remain available indefinitely when no TTL is configured."""
+    now = [100.0]
+    mem = InMemoryMemory(conversation_ttl_seconds=None, time_fn=lambda: now[0])
+
+    mem.add({"role": "user", "content": "keep me"})
+    now[0] += 10_000
+
+    assert mem.messages == [{"role": "user", "content": "keep me"}]
+
+
+def test_expired_conversation_is_cleared_on_access():
+    """Expired in-memory conversations are cleaned up when retrieved."""
+    now = [100.0]
+    mem = InMemoryMemory(conversation_ttl_seconds=30, time_fn=lambda: now[0])
+
+    mem.add({"role": "user", "content": "temporary"})
+    now[0] += 30
+
+    assert mem.messages == []
+
+
+def test_add_after_expiry_starts_fresh_history():
+    """Adding a message after expiry discards stale messages first."""
+    now = [100.0]
+    mem = InMemoryMemory(conversation_ttl_seconds=10, time_fn=lambda: now[0])
+
+    mem.add({"role": "user", "content": "old"})
+    now[0] += 11
+    mem.add({"role": "user", "content": "new"})
+
+    assert mem.messages == [{"role": "user", "content": "new"}]
+
+
+def test_ttl_refreshes_on_activity_before_expiry():
+    """Active conversations stay alive until they are idle past the TTL."""
+    now = [100.0]
+    mem = InMemoryMemory(conversation_ttl_seconds=10, time_fn=lambda: now[0])
+
+    mem.add({"role": "user", "content": "still active"})
+    now[0] += 9
+    assert len(mem.messages) == 1
+
+    now[0] += 9
+    assert mem.messages == [{"role": "user", "content": "still active"}]
+
+    now[0] += 10
+    assert mem.messages == []
+
+
+@pytest.mark.parametrize("ttl", [0, -1, float("inf"), float("nan"), True, "60"])
+def test_invalid_ttl_raises_error(ttl):
+    """Invalid TTL values fail fast."""
+    with pytest.raises(ValueError, match="conversation_ttl_seconds"):
+        InMemoryMemory(conversation_ttl_seconds=ttl)
+
+
+def test_time_fn_must_be_callable():
+    """Invalid time providers fail fast before memory access."""
+    with pytest.raises(TypeError, match="time_fn must be callable"):
+        InMemoryMemory(time_fn=123)  # type: ignore[arg-type]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
