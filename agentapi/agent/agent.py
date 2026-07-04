@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from agentapi.agent.memory import InMemoryMemory, MemoryBackend
 from agentapi.agent.tools import ToolDefinition, parse_tool_args, to_tool_definition
 from agentapi.config.settings import get_settings
-from agentapi.errors import AgentConfigurationError
+from agentapi.errors import AgentConfigurationError, AgentProviderError
 from agentapi.providers.base import BaseProvider, ToolCall
 from agentapi.providers.gemini import GeminiProvider
 from agentapi.providers.openai import OpenAIProvider
@@ -26,14 +26,6 @@ ProviderFactory = Callable[["Agent", Any, str], BaseProvider]
 class AgentAPIUsageError(Exception):
     """Raised when the developer uses the AgentAPI incorrectly."""
     pass
-
-
-class AgentAPIProviderError(Exception):
-    """Raised when an upstream LLM provider call fails."""
-
-    def __init__(self, message: str, original: Exception | None = None) -> None:
-        super().__init__(message)
-        self.original = original
 
 
 class Agent:
@@ -102,15 +94,14 @@ class Agent:
                     tools=self._tool_schemas(),
                     tool_calling=self.tool_calling,
                 )
-            except AgentAPIProviderError:
+            except AgentProviderError:
                 raise
             except Exception as exc:
                 logger.exception(
                     "[AgentAPI] Provider error in run(). Check your API key and provider configuration."
                 )
-                raise AgentAPIProviderError(
-                    f"Provider call failed: {exc}. Check your API key and provider configuration.",
-                    original=exc,
+                raise AgentProviderError(
+                    f"Provider call failed: {exc}. Check your API key and provider configuration."
                 ) from exc
 
             if response.tool_calls:
@@ -169,7 +160,7 @@ class Agent:
                     for line in str(token).replace("\r", "").split("\n"):
                         yield f"data: {line}\n"
                     yield "\n"
-            except AgentAPIProviderError:
+            except AgentProviderError:
                 logger.exception("[AgentAPI] Streaming error surfaced in SSE generator.")
                 yield "data: [ERROR] Streaming failed. Check server logs for details.\n\n"
 
@@ -191,16 +182,13 @@ class Agent:
             ):
                 collected.append(token)
                 yield token
-        except AgentAPIProviderError:
+        except AgentProviderError:
             raise
         except Exception as exc:
             logger.exception(
                 "[AgentAPI] Streaming error. Check your provider configuration and API key."
             )
-            raise AgentAPIProviderError(
-                f"Streaming failed: {exc}",
-                original=exc,
-            ) from exc
+            raise AgentProviderError(f"Streaming failed: {exc}") from exc
 
         full_text = "".join(collected)
         self.memory.add({"role": "user", "content": message})
