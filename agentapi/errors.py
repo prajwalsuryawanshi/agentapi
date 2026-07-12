@@ -12,3 +12,8 @@ class AgentProviderError(RuntimeError):
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
+
+
+class AgentSchemaValidationError(RuntimeError):
+    """Raised when an LLM fails to output valid JSON matching a Pydantic schema."""
+    pass
