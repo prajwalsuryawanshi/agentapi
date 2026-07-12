@@ -106,8 +106,10 @@ class FileMemory(MemoryBackend):
     def add(self, message: dict[str, Any]) -> None:
         messages = self.messages
         messages.append(message)
-        with open(self.file_path, "w", encoding="utf-8") as f:
+        temp_path = self.file_path.with_suffix(".json.tmp")
+        with open(temp_path, "w", encoding="utf-8") as f:
             json.dump(messages, f, indent=2)
+        temp_path.replace(self.file_path)
 
     def reset(self) -> None:
         if self.file_path.exists():
@@ -188,6 +190,12 @@ class SqliteMemory(MemoryBackend):
         )
         self.conn.commit()
         
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
     def close(self) -> None:
         self.conn.close()
 

@@ -35,6 +35,9 @@ dependencies = [
 redis = [
   "redis>=5.0.0"
 ]
+examples = [
+  "aiohttp>=3.9.0"
+]
 
 [project.urls]
 Homepage = "https://github.com/prajwalsuryawanshi/agentapi"

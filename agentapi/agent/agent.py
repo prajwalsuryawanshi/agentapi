@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import logging
 import asyncio
+import json
 import uuid
 from typing import Any, AsyncIterator, Callable
 
@@ -84,13 +85,14 @@ class Agent:
         definition = to_tool_definition(func)
         self._tools[definition.name] = definition
 
-    def reset_memory(self) -> None:
+    async def reset_memory(self) -> None:
         """Clear conversation state but preserve the agent system prompt."""
-        self.memory.reset()
+        await asyncio.to_thread(self.memory.reset)
 
-    def _conversation_messages(self, extra_messages: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    async def _conversation_messages(self, extra_messages: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = [{"role": "system", "content": self.system_prompt}]
-        messages.extend(self.memory.messages)
+        backend_msgs = await asyncio.to_thread(lambda: self.memory.messages)
+        messages.extend(backend_msgs)
         if extra_messages:
             messages.extend(extra_messages)
         return messages
@@ -99,12 +101,21 @@ class Agent:
         if not self.hooks:
             return
         tasks = []
+        active_hooks = []
         for hook in self.hooks:
             method = getattr(hook, event_name, None)
             if method:
                 tasks.append(method(*args, **kwargs))
+                active_hooks.append(hook)
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for hook, result in zip(active_hooks, results):
+                if isinstance(result, Exception):
+                    logger.warning(
+                        "[AgentAPI] Hook %s raised: %s",
+                        type(hook).__name__,
+                        result,
+                    )
 
     async def run(
         self, 
@@ -123,9 +134,9 @@ class Agent:
             system_instructions = self.system_prompt
             if output_schema:
                 schema_json = output_schema.model_json_schema()
-                system_instructions += f"\n\nYou must output a valid JSON object matching this schema:\n{schema_json}"
+                system_instructions += f"\n\nYou must output a valid JSON object matching this schema:\n{json.dumps(schema_json, indent=2)}"
 
-            conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
+            conversation_messages = await self._conversation_messages([{"role": "user", "content": message}])
             if output_schema:
                 conversation_messages[0]["content"] = system_instructions
             
@@ -178,8 +189,8 @@ class Agent:
                     if output_schema:
                         try:
                             parsed_response = output_schema.model_validate_json(response.content)
-                            self.memory.add({"role": "user", "content": message})
-                            self.memory.add({"role": "assistant", "content": response.content})
+                            await asyncio.to_thread(self.memory.add, {"role": "user", "content": message})
+                            await asyncio.to_thread(self.memory.add, {"role": "assistant", "content": response.content})
                             await self._dispatch_hook("on_agent_end", run_id=run_id, final_response=parsed_response)
                             return parsed_response
                         except ValidationError as e:
@@ -187,7 +198,7 @@ class Agent:
                             if validation_attempts > max_validation_retries:
                                 raise AgentSchemaValidationError(
                                     f"Failed to produce valid JSON matching schema after {max_validation_retries} retries. Error: {e}"
-                                )
+                                ) from e
                             conversation_messages.append({"role": "assistant", "content": response.content})
                             conversation_messages.append({
                                 "role": "user", 
@@ -195,17 +206,17 @@ class Agent:
                             })
                             break # Break the tool loop, retry the outer validation loop
 
-                    self.memory.add({"role": "user", "content": message})
-                    self.memory.add({"role": "assistant", "content": response.content})
+                    await asyncio.to_thread(self.memory.add, {"role": "user", "content": message})
+                    await asyncio.to_thread(self.memory.add, {"role": "assistant", "content": response.content})
                     await self._dispatch_hook("on_agent_end", run_id=run_id, final_response=response.content)
                     return response.content
 
-                if validation_attempts <= max_validation_retries and not response.tool_calls and not output_schema:
-                    break # If no schema validation and we exhausted rounds but didn't return (shouldn't happen)
+                if response.tool_calls or not output_schema:
+                    break
 
             fallback = "Tool loop reached max rounds without final response"
-            self.memory.add({"role": "user", "content": message})
-            self.memory.add({"role": "assistant", "content": fallback})
+            await asyncio.to_thread(self.memory.add, {"role": "user", "content": message})
+            await asyncio.to_thread(self.memory.add, {"role": "assistant", "content": fallback})
             await self._dispatch_hook("on_agent_end", run_id=run_id, final_response=fallback)
             return fallback
 
@@ -248,7 +259,7 @@ class Agent:
     async def _stream_generator(self, message: str) -> AsyncIterator[str]:
         """Internal async generator that streams tokens from the provider."""
 
-        conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
+        conversation_messages = await self._conversation_messages([{"role": "user", "content": message}])
         provider = self._get_provider()
 
         collected: list[str] = []
@@ -273,8 +284,8 @@ class Agent:
             ) from exc
 
         full_text = "".join(collected)
-        self.memory.add({"role": "user", "content": message})
-        self.memory.add({"role": "assistant", "content": full_text})
+        await asyncio.to_thread(self.memory.add, {"role": "user", "content": message})
+        await asyncio.to_thread(self.memory.add, {"role": "assistant", "content": full_text})
 
     def _create_provider(self, settings: Any) -> BaseProvider:
         custom_factory = self._custom_provider_factories.get(self.provider_name)

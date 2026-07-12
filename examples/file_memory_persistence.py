@@ -17,9 +17,10 @@ class MockProvider(BaseProvider):
         yield ""
 
 async def main():
-    # 1. Generate a fixed conversation ID
-    conversation_id = str(uuid.uuid4())
     memory_dir = Path(".test_memory")
+    try:
+        # 1. Generate a fixed conversation ID
+        conversation_id = str(uuid.uuid4())
     
     print(f"--- Session 1: Starting new conversation {conversation_id} ---")
     memory1 = FileMemory(conversation_id=conversation_id, storage_dir=memory_dir)
@@ -54,11 +55,15 @@ async def main():
     memory2.reset()
     print(f"Messages in file after reset: {len(memory2.messages)}")
     
-    # Cleanup
-    if memory_dir.exists():
-        for file in memory_dir.glob("*.json"):
-            file.unlink()
-        memory_dir.rmdir()
+    finally:
+        # Cleanup
+        if memory_dir.exists():
+            for file in memory_dir.glob("*.json"):
+                file.unlink()
+            try:
+                memory_dir.rmdir()
+            except OSError:
+                pass
 
 if __name__ == "__main__":
     asyncio.run(main())

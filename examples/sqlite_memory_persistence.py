@@ -1,6 +1,5 @@
 import asyncio
 import uuid
-import sqlite3
 from pathlib import Path
 from agentapi.agent.agent import Agent
 from agentapi.agent.memory import SqliteMemory
@@ -18,9 +17,12 @@ class MockProvider(BaseProvider):
         yield ""
 
 async def main():
-    # 1. Generate a fixed conversation ID
-    conversation_id = str(uuid.uuid4())
     db_path = Path(".test_memory/test.db")
+    memory1 = None
+    memory2 = None
+    try:
+        # 1. Generate a fixed conversation ID
+        conversation_id = str(uuid.uuid4())
     
     print(f"--- Session 1: Starting new conversation {conversation_id} ---")
     memory1 = SqliteMemory(conversation_id=conversation_id, db_path=db_path)
@@ -54,12 +56,20 @@ async def main():
     print("\n--- Resetting Memory ---")
     memory2.reset()
     print(f"Messages in DB after reset: {len(memory2.messages)}")
-    memory2.close()
-    
-    # Cleanup
-    if db_path.exists():
-        db_path.unlink()
-        db_path.parent.rmdir()
+    finally:
+        if memory1:
+            memory1.close()
+        if memory2:
+            memory2.close()
+            
+        # Cleanup
+        if db_path.exists():
+            db_path.unlink()
+        if db_path.parent.exists():
+            try:
+                db_path.parent.rmdir()
+            except OSError:
+                pass
 
 if __name__ == "__main__":
     asyncio.run(main())

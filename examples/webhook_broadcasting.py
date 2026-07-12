@@ -4,15 +4,31 @@ from agentapi.agent.agent import Agent
 from agentapi.agent.webhooks import WebhookHook
 from agentapi.providers.base import BaseProvider, ProviderResponse, ToolCall
 
-# We will create a simple mock web server using asyncio to receive the webhook
-from aiohttp import web
+import os
+import hmac
+import hashlib
 
 async def handle_webhook(request):
     event = request.headers.get("X-Agent-Event")
     signature = request.headers.get("X-Agent-Signature")
+    timestamp = request.headers.get("X-Agent-Timestamp")
+    
+    payload_bytes = await request.read()
     payload = await request.json()
+    
+    secret_token = os.environ.get("WEBHOOK_SECRET_TOKEN", "fallback-secret-key").encode("utf-8")
+    
+    if not signature or not timestamp:
+        return web.Response(text="Missing signature or timestamp", status=401)
+        
+    signed_content = f"{timestamp}:".encode("utf-8") + payload_bytes
+    expected_sig = "sha256=" + hmac.new(secret_token, signed_content, hashlib.sha256).hexdigest()
+    
+    if not hmac.compare_digest(signature, expected_sig):
+        return web.Response(text="Invalid signature", status=401)
+
     print(f"\n[SERVER RECEIVER] Received Webhook Event: {event}")
-    print(f"[SERVER RECEIVER] Signature: {signature}")
+    print(f"[SERVER RECEIVER] Signature Verified: {signature}")
     print(f"[SERVER RECEIVER] Payload: {payload}")
     return web.Response(text="OK")
 
@@ -40,9 +56,10 @@ async def main():
     print("Mock webhook server running on http://localhost:8080/webhook")
 
     # 2. Configure the Agent with the WebhookHook
+    secret_token = os.environ.get("WEBHOOK_SECRET_TOKEN", "fallback-secret-key")
     webhook_hook = WebhookHook(
         endpoint_url="http://localhost:8080/webhook",
-        secret_token="my-super-secret-key"
+        secret_token=secret_token
     )
     
     agent = Agent(
@@ -63,7 +80,7 @@ async def main():
 if __name__ == "__main__":
     try:
         import httpx
-        import aiohttp
+        from aiohttp import web
     except ImportError:
         print("Please install httpx and aiohttp: pip install httpx aiohttp")
         sys.exit(1)
