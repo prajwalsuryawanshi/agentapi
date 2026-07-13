@@ -258,34 +258,48 @@ class Agent:
 
     async def _stream_generator(self, message: str) -> AsyncIterator[str]:
         """Internal async generator that streams tokens from the provider."""
-
-        conversation_messages = await self._conversation_messages([{"role": "user", "content": message}])
-        provider = self._get_provider()
-
-        collected: list[str] = []
-
+        run_id = str(uuid.uuid4())
         try:
-            async for token in provider.stream(
-                conversation_messages,
-                tools=self._tool_schemas(),
-                tool_calling=self.tool_calling,
-            ):
-                collected.append(token)
-                yield token
-        except AgentAPIProviderError:
-            raise
-        except Exception as exc:
-            logger.exception(
-                "[AgentAPI] Streaming error. Check your provider configuration and API key."
-            )
-            raise AgentAPIProviderError(
-                f"Streaming failed: {exc}",
-                original=exc,
-            ) from exc
+            await self._dispatch_hook("on_agent_start", run_id=run_id, message=message)
 
-        full_text = "".join(collected)
-        await asyncio.to_thread(self.memory.add, {"role": "user", "content": message})
-        await asyncio.to_thread(self.memory.add, {"role": "assistant", "content": full_text})
+            conversation_messages = await self._conversation_messages([{"role": "user", "content": message}])
+            provider = self._get_provider()
+
+            collected: list[str] = []
+
+            try:
+                await self._dispatch_hook("on_llm_start", run_id=run_id, messages=conversation_messages)
+                async for token in provider.stream(
+                    conversation_messages,
+                    tools=self._tool_schemas(),
+                    tool_calling=self.tool_calling,
+                ):
+                    collected.append(token)
+                    yield token
+                    
+                from agentapi.providers.base import ProviderResponse
+                response = ProviderResponse(content="".join(collected), tool_calls=[], raw_message={})
+                await self._dispatch_hook("on_llm_end", run_id=run_id, response=response)
+            except AgentAPIProviderError:
+                raise
+            except Exception as exc:
+                logger.exception(
+                    "[AgentAPI] Streaming error. Check your provider configuration and API key."
+                )
+                raise AgentAPIProviderError(
+                    f"Streaming failed: {exc}",
+                    original=exc,
+                ) from exc
+
+            full_text = "".join(collected)
+            await asyncio.to_thread(self.memory.add, {"role": "user", "content": message})
+            await asyncio.to_thread(self.memory.add, {"role": "assistant", "content": full_text})
+            
+            await self._dispatch_hook("on_agent_end", run_id=run_id, final_response=full_text)
+
+        except Exception as exc:
+            await self._dispatch_hook("on_agent_error", run_id=run_id, error=exc)
+            raise
 
     def _create_provider(self, settings: Any) -> BaseProvider:
         custom_factory = self._custom_provider_factories.get(self.provider_name)

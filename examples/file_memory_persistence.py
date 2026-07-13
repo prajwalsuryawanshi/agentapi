@@ -21,40 +21,40 @@ async def main():
     try:
         # 1. Generate a fixed conversation ID
         conversation_id = str(uuid.uuid4())
-    
-    print(f"--- Session 1: Starting new conversation {conversation_id} ---")
-    memory1 = FileMemory(conversation_id=conversation_id, storage_dir=memory_dir)
-    
-    agent1 = Agent(
-        system_prompt="You are a helpful assistant.",
-        provider=MockProvider(),
-        memory=memory1
-    )
-    
-    result1 = await agent1.run("Hello there!")
-    print(f"Agent 1 response: {result1}")
-    print(f"Messages in file: {len(memory1.messages)}")
-    
-    # 2. Re-initialize a brand new Agent with the SAME conversation ID
-    print(f"\n--- Session 2: Resuming conversation {conversation_id} ---")
-    memory2 = FileMemory(conversation_id=conversation_id, storage_dir=memory_dir)
-    
-    agent2 = Agent(
-        system_prompt="You are a helpful assistant.",
-        provider=MockProvider(),
-        memory=memory2
-    )
-    
-    # The agent should instantly remember the previous messages loaded from the file
-    result2 = await agent2.run("Do you remember me?")
-    print(f"Agent 2 response: {result2}")
-    print(f"Messages in file: {len(memory2.messages)}")
-    
-    # 3. Test Reset
-    print("\n--- Resetting Memory ---")
-    memory2.reset()
-    print(f"Messages in file after reset: {len(memory2.messages)}")
-    
+        
+        print(f"--- Session 1: Starting new conversation {conversation_id} ---")
+        memory1 = FileMemory(conversation_id=conversation_id, storage_dir=memory_dir)
+        
+        agent1 = Agent(
+            system_prompt="You are a helpful assistant.",
+            provider=MockProvider(),
+            memory=memory1
+        )
+        
+        result1 = await agent1.run("Hello there!")
+        print(f"Agent 1 response: {result1}")
+        print(f"Messages in file: {len(memory1.messages)}")
+        
+        # 2. Re-initialize a brand new Agent with the SAME conversation ID
+        print(f"\n--- Session 2: Resuming conversation {conversation_id} ---")
+        memory2 = FileMemory(conversation_id=conversation_id, storage_dir=memory_dir)
+        
+        agent2 = Agent(
+            system_prompt="You are a helpful assistant.",
+            provider=MockProvider(),
+            memory=memory2
+        )
+        
+        # The agent should instantly remember the previous messages loaded from the file
+        result2 = await agent2.run("Do you remember me?")
+        print(f"Agent 2 response: {result2}")
+        print(f"Messages in file: {len(memory2.messages)}")
+        
+        # 3. Test Reset
+        print("\n--- Resetting Memory ---")
+        memory2.reset()
+        print(f"Messages in file after reset: {len(memory2.messages)}")
+        
     finally:
         # Cleanup
         if memory_dir.exists():

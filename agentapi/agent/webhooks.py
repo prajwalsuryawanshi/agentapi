@@ -35,6 +35,13 @@ class WebhookHook(AgentHook):
         max_retries: int = 3,
         secret_token: str | None = None,
     ) -> None:
+        """
+        Initialize the WebhookHook.
+        
+        WARNING: The `endpoint_url` should come from a trusted developer configuration
+        or be heavily restricted. Accepting an endpoint_url from untrusted user input
+        can lead to Server-Side Request Forgery (SSRF) vulnerabilities.
+        """
         if httpx is None:
             raise ImportError("httpx is required for WebhookHook. Run: pip install httpx")
         
@@ -42,6 +49,8 @@ class WebhookHook(AgentHook):
         self.events = set(events) if events else None
         self.max_retries = max_retries
         self.secret_token = secret_token.encode("utf-8") if secret_token else None
+        self._client = httpx.AsyncClient()
+        self._background_tasks = set()
 
     def _dispatch_webhook(self, event_name: str, payload: dict[str, Any]) -> None:
         """Schedules the payload to be sent to the webhook endpoint in the background."""
@@ -61,27 +70,28 @@ class WebhookHook(AgentHook):
             headers["X-Agent-Signature"] = f"sha256={signature}"
 
         async def _send_task():
-            async with httpx.AsyncClient() as client:
-                for attempt in range(self.max_retries + 1):
-                    try:
-                        response = await client.post(self.endpoint_url, content=payload_bytes, headers=headers)
-                        response.raise_for_status()
+            for attempt in range(self.max_retries + 1):
+                try:
+                    response = await self._client.post(self.endpoint_url, content=payload_bytes, headers=headers)
+                    response.raise_for_status()
+                    return
+                except httpx.HTTPStatusError as e:
+                    if 400 <= e.response.status_code < 500:
+                        logger.error(f"Webhook {event_name} failed with client error {e.response.status_code}: {e}")
                         return
-                    except httpx.HTTPStatusError as e:
-                        if 400 <= e.response.status_code < 500:
-                            logger.error(f"Webhook {event_name} failed with client error {e.response.status_code}: {e}")
-                            return
-                        if attempt == self.max_retries:
-                            logger.error(f"Webhook {event_name} failed after {self.max_retries} retries: {e}")
-                        else:
-                            await asyncio.sleep(2 ** attempt)
-                    except httpx.HTTPError as e:
-                        if attempt == self.max_retries:
-                            logger.error(f"Webhook {event_name} failed after {self.max_retries} retries: {e}")
-                        else:
-                            await asyncio.sleep(2 ** attempt)
+                    if attempt == self.max_retries:
+                        logger.error(f"Webhook {event_name} failed after {self.max_retries} retries: {e}")
+                    else:
+                        await asyncio.sleep(2 ** attempt)
+                except httpx.HTTPError as e:
+                    if attempt == self.max_retries:
+                        logger.error(f"Webhook {event_name} failed after {self.max_retries} retries: {e}")
+                    else:
+                        await asyncio.sleep(2 ** attempt)
 
-        asyncio.create_task(_send_task())
+        task = asyncio.create_task(_send_task())
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     async def on_agent_start(self, run_id: str, message: str, **kwargs: Any) -> None:
         self._dispatch_webhook("on_agent_start", {"run_id": run_id, "message": message})
@@ -115,4 +125,5 @@ class WebhookHook(AgentHook):
         self._dispatch_webhook("on_agent_end", {"run_id": run_id, "final_response": content})
 
     async def on_agent_error(self, run_id: str, error: Exception, **kwargs: Any) -> None:
-        self._dispatch_webhook("on_agent_error", {"run_id": run_id, "error": str(error)})
+        error_name = type(error).__name__
+        self._dispatch_webhook("on_agent_error", {"run_id": run_id, "error": error_name})

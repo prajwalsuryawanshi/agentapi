@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import json
 import sqlite3
+import threading
 from importlib import import_module
 from abc import ABC, abstractmethod
 from typing import Any
@@ -92,6 +93,7 @@ class FileMemory(MemoryBackend):
         self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.file_path = self.storage_dir / f"{self.conversation_id}.json"
+        self._lock = threading.Lock()
 
     @property
     def messages(self) -> list[dict[str, Any]]:
@@ -104,12 +106,13 @@ class FileMemory(MemoryBackend):
             return []
 
     def add(self, message: dict[str, Any]) -> None:
-        messages = self.messages
-        messages.append(message)
-        temp_path = self.file_path.with_suffix(".json.tmp")
-        with open(temp_path, "w", encoding="utf-8") as f:
-            json.dump(messages, f, indent=2)
-        temp_path.replace(self.file_path)
+        with self._lock:
+            messages = self.messages
+            messages.append(message)
+            temp_path = self.file_path.with_suffix(".json.tmp")
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(messages, f, indent=2)
+            temp_path.replace(self.file_path)
 
     def reset(self) -> None:
         if self.file_path.exists():
