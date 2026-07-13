@@ -115,8 +115,9 @@ class FileMemory(MemoryBackend):
             temp_path.replace(self.file_path)
 
     def reset(self) -> None:
-        if self.file_path.exists():
-            self.file_path.unlink()
+        with self._lock:
+            if self.file_path.exists():
+                self.file_path.unlink()
 
 
 class SqliteMemory(MemoryBackend):
