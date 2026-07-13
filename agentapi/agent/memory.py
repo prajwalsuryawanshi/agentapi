@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import os
 import json
+import sqlite3
+import threading
 from importlib import import_module
 from abc import ABC, abstractmethod
 from typing import Any
 from uuid import UUID, uuid4
+from pathlib import Path
 
 
 def create_conversation_id() -> str:
@@ -66,6 +70,138 @@ class InMemoryMemory(MemoryBackend):
 
     def reset(self) -> None:
         self._conversations[self.conversation_id] = []
+
+
+class FileMemory(MemoryBackend):
+    """Stores chat messages in local JSON files.
+
+    Provides lightweight persistence across application restarts without 
+    requiring external databases like Redis.
+    """
+
+    def __init__(
+        self,
+        conversation_id: str | None = None,
+        *,
+        storage_dir: str | Path = ".agent_memory",
+    ) -> None:
+        if conversation_id is not None:
+            self.conversation_id = str(UUID(conversation_id))
+        else:
+            self.conversation_id = create_conversation_id()
+            
+        self.storage_dir = Path(storage_dir)
+        self.storage_dir.mkdir(parents=True, exist_ok=True)
+        self.file_path = self.storage_dir / f"{self.conversation_id}.json"
+        self._lock = threading.Lock()
+
+    @property
+    def messages(self) -> list[dict[str, Any]]:
+        if not self.file_path.exists():
+            return []
+        try:
+            with open(self.file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            return []
+
+    def add(self, message: dict[str, Any]) -> None:
+        with self._lock:
+            messages = self.messages
+            messages.append(message)
+            temp_path = self.file_path.with_suffix(".json.tmp")
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(messages, f, indent=2)
+            temp_path.replace(self.file_path)
+
+    def reset(self) -> None:
+        with self._lock:
+            if self.file_path.exists():
+                self.file_path.unlink()
+
+
+class SqliteMemory(MemoryBackend):
+    """SQLite-backed memory for robust local persistence.
+
+    Uses Python's built-in sqlite3 module to store conversations in a single
+    database file, allowing for easy querying and backup.
+    """
+
+    def __init__(
+        self,
+        conversation_id: str | None = None,
+        *,
+        db_path: str | Path = ".agent_memory/memory.db",
+    ) -> None:
+        if conversation_id is not None:
+            self.conversation_id = str(UUID(conversation_id))
+        else:
+            self.conversation_id = create_conversation_id()
+            
+        # Ensure directory exists
+        db_path = Path(db_path)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._init_db()
+
+    def _init_db(self) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id TEXT NOT NULL,
+                message_json TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_conv_id 
+            ON messages (conversation_id)
+        ''')
+        self.conn.commit()
+
+    @property
+    def messages(self) -> list[dict[str, Any]]:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT message_json FROM messages WHERE conversation_id = ? ORDER BY id ASC", 
+            (self.conversation_id,)
+        )
+        rows = cursor.fetchall()
+        
+        parsed = []
+        for row in rows:
+            try:
+                parsed.append(json.loads(row[0]))
+            except json.JSONDecodeError:
+                continue
+        return parsed
+
+    def add(self, message: dict[str, Any]) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "INSERT INTO messages (conversation_id, message_json) VALUES (?, ?)",
+            (self.conversation_id, json.dumps(message))
+        )
+        self.conn.commit()
+
+    def reset(self) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "DELETE FROM messages WHERE conversation_id = ?",
+            (self.conversation_id,)
+        )
+        self.conn.commit()
+        
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def close(self) -> None:
+        self.conn.close()
 
 
 class RedisMemory(MemoryBackend):

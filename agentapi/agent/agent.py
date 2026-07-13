@@ -4,14 +4,20 @@ from __future__ import annotations
 
 import inspect
 import logging
+import asyncio
+import json
+import uuid
 from typing import Any, AsyncIterator, Callable
 
 from fastapi.responses import StreamingResponse
 
+from agentapi.agent.hooks import AgentHook
 from agentapi.agent.memory import InMemoryMemory, MemoryBackend
 from agentapi.agent.tools import ToolDefinition, parse_tool_args, to_tool_definition
 from agentapi.config.settings import get_settings
-from agentapi.errors import AgentConfigurationError
+from agentapi.errors import AgentConfigurationError, AgentSchemaValidationError
+from agentapi.providers.base import BaseProvider, ToolCall
+from pydantic import BaseModel, ValidationError
 from agentapi.providers.base import BaseProvider, ToolCall
 from agentapi.providers.gemini import GeminiProvider
 from agentapi.providers.openai import OpenAIProvider
@@ -50,6 +56,7 @@ class Agent:
         model: str | None = None,
         tools: list[Callable[..., Any]] | None = None,
         tool_calling: dict[str, Any] | None = None,
+        hooks: list[AgentHook] | None = None,
     ) -> None:
         settings = get_settings()
 
@@ -64,6 +71,7 @@ class Agent:
         if tool_calling:
             self.tool_calling.update(tool_calling)
         self.memory = memory or InMemoryMemory()
+        self.hooks = hooks or []
 
         self._settings = settings
         self._provider: BaseProvider | None = provider if isinstance(provider, BaseProvider) else None
@@ -77,71 +85,144 @@ class Agent:
         definition = to_tool_definition(func)
         self._tools[definition.name] = definition
 
-    def reset_memory(self) -> None:
+    async def reset_memory(self) -> None:
         """Clear conversation state but preserve the agent system prompt."""
-        self.memory.reset()
+        await asyncio.to_thread(self.memory.reset)
 
-    def _conversation_messages(self, extra_messages: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    async def _conversation_messages(self, extra_messages: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = [{"role": "system", "content": self.system_prompt}]
-        messages.extend(self.memory.messages)
+        backend_msgs = await asyncio.to_thread(lambda: self.memory.messages)
+        messages.extend(backend_msgs)
         if extra_messages:
             messages.extend(extra_messages)
         return messages
 
-    async def run(self, message: str, *, max_tool_rounds: int = 3) -> str:
-        """Execute a chat completion with optional tool-calling loop."""
+    async def _dispatch_hook(self, event_name: str, *args: Any, **kwargs: Any) -> None:
+        if not self.hooks:
+            return
+        tasks = []
+        active_hooks = []
+        for hook in self.hooks:
+            method = getattr(hook, event_name, None)
+            if method:
+                tasks.append(method(*args, **kwargs))
+                active_hooks.append(hook)
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for hook, result in zip(active_hooks, results):
+                if isinstance(result, Exception):
+                    logger.warning(
+                        "[AgentAPI] Hook %s raised: %s",
+                        type(hook).__name__,
+                        result,
+                    )
 
-        conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
-        provider = self._get_provider()
+    async def run(
+        self, 
+        message: str, 
+        *, 
+        max_tool_rounds: int = 3,
+        output_schema: type[BaseModel] | None = None,
+        max_validation_retries: int = 1,
+    ) -> str | BaseModel:
+        """Execute a chat completion with optional tool-calling loop and Pydantic schema validation."""
+        run_id = str(uuid.uuid4())
+        
+        try:
+            await self._dispatch_hook("on_agent_start", run_id=run_id, message=message)
 
-        for _ in range(max_tool_rounds + 1):
-            # Narrow the provider error wrapper to only the actual provider call.
-            try:
-                response = await provider.chat(
-                    conversation_messages,
-                    tools=self._tool_schemas(),
-                    tool_calling=self.tool_calling,
-                )
-            except AgentAPIProviderError:
-                raise
-            except Exception as exc:
-                logger.exception(
-                    "[AgentAPI] Provider error in run(). Check your API key and provider configuration."
-                )
-                raise AgentAPIProviderError(
-                    f"Provider call failed: {exc}. Check your API key and provider configuration.",
-                    original=exc,
-                ) from exc
+            system_instructions = self.system_prompt
+            if output_schema:
+                schema_json = output_schema.model_json_schema()
+                system_instructions += f"\n\nYou must output a valid JSON object matching this schema:\n{json.dumps(schema_json, indent=2)}"
 
-            if response.tool_calls:
-                conversation_messages.append(
-                    {
-                        "role": "assistant",
-                        "content": response.content or "",
-                        "tool_calls": [
+            conversation_messages = await self._conversation_messages([{"role": "user", "content": message}])
+            if output_schema:
+                conversation_messages[0]["content"] = system_instructions
+            
+            provider = self._get_provider()
+
+            validation_attempts = 0
+            while validation_attempts <= max_validation_retries:
+                for _ in range(max_tool_rounds + 1):
+                    # Narrow the provider error wrapper to only the actual provider call.
+                    try:
+                        await self._dispatch_hook("on_llm_start", run_id=run_id, messages=conversation_messages)
+                        response = await provider.chat(
+                            conversation_messages,
+                            tools=self._tool_schemas(),
+                            tool_calling=self.tool_calling,
+                        )
+                        await self._dispatch_hook("on_llm_end", run_id=run_id, response=response)
+                    except AgentAPIProviderError:
+                        raise
+                    except Exception as exc:
+                        logger.exception(
+                            "[AgentAPI] Provider error in run(). Check your API key and provider configuration."
+                        )
+                        raise AgentAPIProviderError(
+                            f"Provider call failed: {exc}. Check your API key and provider configuration.",
+                            original=exc,
+                        ) from exc
+
+                    if response.tool_calls:
+                        conversation_messages.append(
                             {
-                                "id": call.id,
-                                "type": "function",
-                                "function": {
-                                    "name": call.name,
-                                    "arguments": call.arguments,
-                                },
+                                "role": "assistant",
+                                "content": response.content or "",
+                                "tool_calls": [
+                                    {
+                                        "id": call.id,
+                                        "type": "function",
+                                        "function": {
+                                            "name": call.name,
+                                            "arguments": call.arguments,
+                                        },
+                                    }
+                                    for call in response.tool_calls
+                                ],
                             }
-                            for call in response.tool_calls
-                        ],
-                    }
-                )
-                await self._execute_tool_calls(response.tool_calls, conversation_messages)
-                continue
+                        )
+                        await self._execute_tool_calls(response.tool_calls, conversation_messages, run_id=run_id)
+                        continue
 
-            self.memory.add({"role": "user", "content": message})
-            self.memory.add({"role": "assistant", "content": response.content})
-            return response.content
+                    if output_schema:
+                        try:
+                            parsed_response = output_schema.model_validate_json(response.content)
+                            await asyncio.to_thread(self.memory.add, {"role": "user", "content": message})
+                            await asyncio.to_thread(self.memory.add, {"role": "assistant", "content": response.content})
+                            await self._dispatch_hook("on_agent_end", run_id=run_id, final_response=parsed_response)
+                            return parsed_response
+                        except ValidationError as e:
+                            validation_attempts += 1
+                            if validation_attempts > max_validation_retries:
+                                raise AgentSchemaValidationError(
+                                    f"Failed to produce valid JSON matching schema after {max_validation_retries} retries. Error: {e}"
+                                ) from e
+                            conversation_messages.append({"role": "assistant", "content": response.content})
+                            conversation_messages.append({
+                                "role": "user", 
+                                "content": f"Your response failed schema validation: {e}. Please fix the JSON output."
+                            })
+                            break # Break the tool loop, retry the outer validation loop
 
-        fallback = "Tool loop reached max rounds without final response"
-        self.memory.add({"role": "user", "content": message})
-        self.memory.add({"role": "assistant", "content": fallback})
-        return fallback
+                    await asyncio.to_thread(self.memory.add, {"role": "user", "content": message})
+                    await asyncio.to_thread(self.memory.add, {"role": "assistant", "content": response.content})
+                    await self._dispatch_hook("on_agent_end", run_id=run_id, final_response=response.content)
+                    return response.content
+
+                if response.tool_calls or not output_schema:
+                    break
+
+            fallback = "Tool loop reached max rounds without final response"
+            await asyncio.to_thread(self.memory.add, {"role": "user", "content": message})
+            await asyncio.to_thread(self.memory.add, {"role": "assistant", "content": fallback})
+            await self._dispatch_hook("on_agent_end", run_id=run_id, final_response=fallback)
+            return fallback
+
+        except Exception as exc:
+            await self._dispatch_hook("on_agent_error", run_id=run_id, error=exc)
+            raise
 
     def stream(self, message: str) -> StreamingResponse:
         """Stream model tokens as FastAPI StreamingResponse using SSE format.
@@ -177,34 +258,48 @@ class Agent:
 
     async def _stream_generator(self, message: str) -> AsyncIterator[str]:
         """Internal async generator that streams tokens from the provider."""
-
-        conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
-        provider = self._get_provider()
-
-        collected: list[str] = []
-
+        run_id = str(uuid.uuid4())
         try:
-            async for token in provider.stream(
-                conversation_messages,
-                tools=self._tool_schemas(),
-                tool_calling=self.tool_calling,
-            ):
-                collected.append(token)
-                yield token
-        except AgentAPIProviderError:
-            raise
-        except Exception as exc:
-            logger.exception(
-                "[AgentAPI] Streaming error. Check your provider configuration and API key."
-            )
-            raise AgentAPIProviderError(
-                f"Streaming failed: {exc}",
-                original=exc,
-            ) from exc
+            await self._dispatch_hook("on_agent_start", run_id=run_id, message=message)
 
-        full_text = "".join(collected)
-        self.memory.add({"role": "user", "content": message})
-        self.memory.add({"role": "assistant", "content": full_text})
+            conversation_messages = await self._conversation_messages([{"role": "user", "content": message}])
+            provider = self._get_provider()
+
+            collected: list[str] = []
+
+            try:
+                await self._dispatch_hook("on_llm_start", run_id=run_id, messages=conversation_messages)
+                async for token in provider.stream(
+                    conversation_messages,
+                    tools=self._tool_schemas(),
+                    tool_calling=self.tool_calling,
+                ):
+                    collected.append(token)
+                    yield token
+                    
+                from agentapi.providers.base import ProviderResponse
+                response = ProviderResponse(content="".join(collected), tool_calls=[], raw_message={})
+                await self._dispatch_hook("on_llm_end", run_id=run_id, response=response)
+            except AgentAPIProviderError:
+                raise
+            except Exception as exc:
+                logger.exception(
+                    "[AgentAPI] Streaming error. Check your provider configuration and API key."
+                )
+                raise AgentAPIProviderError(
+                    f"Streaming failed: {exc}",
+                    original=exc,
+                ) from exc
+
+            full_text = "".join(collected)
+            await asyncio.to_thread(self.memory.add, {"role": "user", "content": message})
+            await asyncio.to_thread(self.memory.add, {"role": "assistant", "content": full_text})
+            
+            await self._dispatch_hook("on_agent_end", run_id=run_id, final_response=full_text)
+
+        except Exception as exc:
+            await self._dispatch_hook("on_agent_error", run_id=run_id, error=exc)
+            raise
 
     def _create_provider(self, settings: Any) -> BaseProvider:
         custom_factory = self._custom_provider_factories.get(self.provider_name)
@@ -291,7 +386,7 @@ class Agent:
             return None
         return [tool.schema for tool in self._tools.values()]
 
-    async def _execute_tool_calls(self, calls: list[ToolCall], conversation_messages: list[dict[str, Any]]) -> None:
+    async def _execute_tool_calls(self, calls: list[ToolCall], conversation_messages: list[dict[str, Any]], run_id: str | None = None) -> None:
         for call in calls:
             tool_def = self._tools.get(call.name)
             if not tool_def:
@@ -306,13 +401,19 @@ class Agent:
                 continue
 
             try:
+                if run_id:
+                    await self._dispatch_hook("on_tool_start", run_id=run_id, tool_call=call)
                 args = parse_tool_args(call.arguments)
                 result = tool_def.func(**args)
                 if inspect.isawaitable(result):
                     result = await result
                 output = str(result)
+                if run_id:
+                    await self._dispatch_hook("on_tool_end", run_id=run_id, tool_call=call, result=output)
             except Exception as exc:  # noqa: BLE001
                 output = f"Tool execution failed: {exc}"
+                if run_id:
+                    await self._dispatch_hook("on_tool_end", run_id=run_id, tool_call=call, result=output)
 
             conversation_messages.append(
                 {
@@ -322,3 +423,4 @@ class Agent:
                     "content": output,
                 }
             )
+
