@@ -17,7 +17,7 @@ TOOLS_TEMPLATE = '''from agentapi import tool\n\n\n@tool\ndef get_weather(city: 
 
 AGENTS_TEMPLATE = '''from agentapi import Agent\nfrom tools import get_weather\n\nassistant = Agent(\n    system_prompt="You are a helpful assistant",\n    provider="{provider}",\n    tools=[get_weather],\n)\n'''
 
-ENV_TEMPLATE = '''OPENAI_API_KEY=\nGEMINI_API_KEY=\nOPENROUTER_API_KEY=\nDEFAULT_PROVIDER={provider}\n'''
+ENV_TEMPLATE = '''OPENAI_API_KEY=\nGEMINI_API_KEY=\nOPENROUTER_API_KEY=\nHUGGINGFACE_API_KEY=\nDEFAULT_PROVIDER={provider}\n'''
 
 
 def _write_file(path: Path, content: str) -> None:
@@ -29,31 +29,8 @@ def _prompt_with_default(label: str, default: str) -> str:
     return value or default
 
 
-def _prompt_provider() -> str:
-    """
-    Prompt the user to select a supported provider.
-    Loops until a valid choice is entered.
-    """
-    providers = sorted(SUPPORTED_PROVIDERS)
-    provider_list = ", ".join(providers)
-
-    print(f"\nSupported providers: {provider_list}")
-
-    while True:
-        choice = input(f"Enter provider [{providers[0]}]: ").strip().lower()
-
-        # Accept empty input → use default (first alphabetically)
-        if not choice:
-            choice = providers[0]
-
-        if choice in SUPPORTED_PROVIDERS:
-            return choice
-
-        print(
-            f'  ✗ "{choice}" is not a supported provider.\n'
-            f"  Supported: {provider_list}\n"
-        )
-
+def _collect_new_project_config(args: argparse.Namespace) -> tuple[str, str]:
+    provider_choices = ["openai", "gemini", "openrouter", "huggingface"]
 
 def _collect_new_project_config(args: argparse.Namespace) -> tuple[str, str]:
     project_name = args.project_name
@@ -144,7 +121,7 @@ def build_parser() -> argparse.ArgumentParser:
     new_parser.add_argument(
         "--provider",
         default="openai",
-        choices=["openai", "gemini", "openrouter"],
+        choices=["openai", "gemini", "openrouter", "huggingface"],
         help="Default provider to scaffold in generated files",
     )
     new_parser.add_argument(
