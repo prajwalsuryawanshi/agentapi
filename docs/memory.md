@@ -160,3 +160,13 @@ agent.reset_memory()
 ```
 
 If you need a different prompt for the next turn, create a new `Agent` with a different `system_prompt`.
+
+## Architecture Reference
+
+For the store/session/scope design, backend capability matrix, concurrency
+constraints, and contribution checklist, see:
+
+- [Memory runtime flow](architecture/runtime.md#memory-flow-and-scope-resolution)
+- [Memory object model](architecture/object-model.md#memory-identity-and-contracts)
+- [Memory scalability](architecture/scalability.md#memory-backend-capability-matrix)
+- [Adding a memory backend](architecture/contributing.md#adding-a-memory-backend)
