@@ -81,17 +81,27 @@ class Agent:
         """Clear conversation state but preserve the agent system prompt."""
         self.memory.reset()
 
-    def _conversation_messages(self, extra_messages: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    def _conversation_messages(self, memory: MemoryBackend | None = None, extra_messages: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = [{"role": "system", "content": self.system_prompt}]
-        messages.extend(self.memory.messages)
+        active_memory = memory or self.memory
+        messages.extend(active_memory.messages)
         if extra_messages:
             messages.extend(extra_messages)
         return messages
 
-    async def run(self, message: str, *, max_tool_rounds: int = 3) -> str:
-        """Execute a chat completion with optional tool-calling loop."""
+    async def run(self, message: str, *, max_tool_rounds: int = 3, memory: MemoryBackend | None = None) -> str:
+        """Execute a chat completion with optional tool-calling loop.
 
-        conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
+        Args:
+            message: The user message to process.
+            max_tool_rounds: Maximum tool-calling iterations (default: 3).
+            memory: Optional memory backend for this request. If not provided,
+                    uses the agent's default memory. Pass a per-request memory
+                    instance to isolate concurrent conversations.
+        """
+
+        active_memory = memory or self.memory
+        conversation_messages = self._conversation_messages(active_memory, [{"role": "user", "content": message}])
         provider = self._get_provider()
 
         for _ in range(max_tool_rounds + 1):
@@ -131,19 +141,19 @@ class Agent:
                         ],
                     }
                 )
-                await self._execute_tool_calls(response.tool_calls, conversation_messages)
+                await self._execute_tool_calls(response.tool_calls, conversation_messages, active_memory)
                 continue
 
-            self.memory.add({"role": "user", "content": message})
-            self.memory.add({"role": "assistant", "content": response.content})
+            active_memory.add({"role": "user", "content": message})
+            active_memory.add({"role": "assistant", "content": response.content})
             return response.content
 
         fallback = "Tool loop reached max rounds without final response"
-        self.memory.add({"role": "user", "content": message})
-        self.memory.add({"role": "assistant", "content": fallback})
+        active_memory.add({"role": "user", "content": message})
+        active_memory.add({"role": "assistant", "content": fallback})
         return fallback
 
-    def stream(self, message: str) -> StreamingResponse:
+    def stream(self, message: str, *, memory: MemoryBackend | None = None) -> StreamingResponse:
         """Stream model tokens as FastAPI StreamingResponse using SSE format.
 
         Each token is split on newline boundaries and emitted as valid SSE
@@ -151,6 +161,11 @@ class Agent:
         Provider errors are logged server-side and surfaced as a sanitized
         ``data: [ERROR] ...\\n\\n`` event so the client never receives raw
         exception text.
+
+        Args:
+            message: The user message to process.
+            memory: Optional memory backend for this request. If not provided,
+                    uses the agent's default memory.
 
         Examples::
 
@@ -165,7 +180,7 @@ class Agent:
         """
         async def _sse_generator() -> AsyncIterator[str]:
             try:
-                async for token in self._stream_generator(message):
+                async for token in self._stream_generator(message, memory):
                     for line in str(token).replace("\r", "").split("\n"):
                         yield f"data: {line}\n"
                     yield "\n"
@@ -175,10 +190,11 @@ class Agent:
 
         return StreamingResponse(_sse_generator(), media_type="text/event-stream")
 
-    async def _stream_generator(self, message: str) -> AsyncIterator[str]:
+    async def _stream_generator(self, message: str, memory: MemoryBackend | None = None) -> AsyncIterator[str]:
         """Internal async generator that streams tokens from the provider."""
 
-        conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
+        active_memory = memory or self.memory
+        conversation_messages = self._conversation_messages(active_memory, [{"role": "user", "content": message}])
         provider = self._get_provider()
 
         collected: list[str] = []
@@ -203,8 +219,8 @@ class Agent:
             ) from exc
 
         full_text = "".join(collected)
-        self.memory.add({"role": "user", "content": message})
-        self.memory.add({"role": "assistant", "content": full_text})
+        active_memory.add({"role": "user", "content": message})
+        active_memory.add({"role": "assistant", "content": full_text})
 
     def _create_provider(self, settings: Any) -> BaseProvider:
         custom_factory = self._custom_provider_factories.get(self.provider_name)
@@ -291,7 +307,7 @@ class Agent:
             return None
         return [tool.schema for tool in self._tools.values()]
 
-    async def _execute_tool_calls(self, calls: list[ToolCall], conversation_messages: list[dict[str, Any]]) -> None:
+    async def _execute_tool_calls(self, calls: list[ToolCall], conversation_messages: list[dict[str, Any]], memory: MemoryBackend | None = None) -> None:
         for call in calls:
             tool_def = self._tools.get(call.name)
             if not tool_def:

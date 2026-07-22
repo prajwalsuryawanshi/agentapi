@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from agentapi.errors import AgentConfigurationError
 from agentapi.errors import AgentProviderError
+from agentapi.agent.memory import InMemoryMemory
 
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -377,13 +378,21 @@ window.addEventListener('load', function () {
 
         If the handler returns an async iterator, AgentAPI automatically responds
         as SSE (`text/event-stream`). Otherwise, it returns regular JSON.
+
+        Per-request memory isolation: If the handler accepts a 'memory' parameter,
+        AgentAPI automatically provides a fresh InMemoryMemory instance per request.
+        This prevents concurrent requests from sharing conversation state.
         """
 
         def decorator(func: F) -> F:
             signature = inspect.signature(func)
+            has_memory_param = "memory" in signature.parameters
 
             @wraps(func)
             async def endpoint(*args: Any, **inner_kwargs: Any) -> Any:
+                if has_memory_param and "memory" not in inner_kwargs:
+                    inner_kwargs["memory"] = InMemoryMemory()
+
                 try:
                     result = await self._invoke_handler(func, *args, **inner_kwargs)
                     if hasattr(result, "__aiter__"):
@@ -406,13 +415,21 @@ window.addEventListener('load', function () {
 
         Backward-compatible alias for explicit streaming-only endpoints.
         New code can use `@app.chat` and simply return an async iterator.
+
+        Per-request memory isolation: If the handler accepts a 'memory' parameter,
+        AgentAPI automatically provides a fresh InMemoryMemory instance per request.
+        This prevents concurrent requests from sharing conversation state.
         """
 
         def decorator(func: F) -> F:
             signature = inspect.signature(func)
+            has_memory_param = "memory" in signature.parameters
 
             @wraps(func)
             async def endpoint(*args: Any, **inner_kwargs: Any) -> Any:
+                if has_memory_param and "memory" not in inner_kwargs:
+                    inner_kwargs["memory"] = InMemoryMemory()
+
                 try:
                     result = await self._invoke_handler(func, *args, **inner_kwargs)
                 except AgentConfigurationError as exc:
