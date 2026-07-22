@@ -366,7 +366,9 @@ window.addEventListener('load', function () {
             sse_encoder(source),
             media_type="text/event-stream",
             headers={
-                "Cache-Control": "no-cache",
+                "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
                 "Connection": "keep-alive",
                 "X-Accel-Buffering": "no",
             },
