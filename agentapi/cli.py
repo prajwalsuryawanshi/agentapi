@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from agentapi.config.settings import SUPPORTED_PROVIDERS
+
 
 MAIN_TEMPLATE = '''from agentapi import AgentAPI, Agent\n\napp = AgentAPI()\n\nagent = Agent(\n    system_prompt="You are a helpful assistant",\n    provider="{provider}",\n)\n\n\n@app.chat("/chat")\nasync def chat(message: str):\n    return await agent.run(message)\n\n\n@app.chat("/stream")\nasync def stream_chat(message: str):\n    return agent.stream(message)\n'''
 
@@ -30,6 +32,7 @@ def _prompt_with_default(label: str, default: str) -> str:
 def _collect_new_project_config(args: argparse.Namespace) -> tuple[str, str]:
     provider_choices = ["openai", "gemini", "openrouter", "huggingface"]
 
+def _collect_new_project_config(args: argparse.Namespace) -> tuple[str, str]:
     project_name = args.project_name
     provider = args.provider.lower()
 
@@ -43,28 +46,8 @@ def _collect_new_project_config(args: argparse.Namespace) -> tuple[str, str]:
                 break
             print("Project name is required.")
 
-        while True:
-            print("Provider options:")
-            for index, choice in enumerate(provider_choices, start=1):
-                marker = " (default)" if choice == provider else ""
-                print(f"  {index}. {choice}{marker}")
-
-            selection = input(f"Select provider [default: {provider}]: ").strip().lower()
-            if not selection:
-                break
-
-            if selection.isdigit():
-                selected_index = int(selection)
-                if 1 <= selected_index <= len(provider_choices):
-                    provider = provider_choices[selected_index - 1]
-                    break
-
-            if selection in provider_choices:
-                provider = selection
-                break
-
-            choices = ", ".join(f"{i + 1}:{name}" for i, name in enumerate(provider_choices))
-            print(f"Invalid provider selection. Choose one of: {choices}")
+        # ── UPDATED: Use the new constrained provider prompt ──
+        provider = _prompt_provider()
 
     if not project_name:
         raise ValueError("Project name is required")

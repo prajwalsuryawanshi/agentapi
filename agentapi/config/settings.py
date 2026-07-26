@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
-
 from dotenv import load_dotenv
 from enum import Enum
-
 
 load_dotenv()
 
@@ -18,9 +15,35 @@ class Provider(str, Enum):
     HUGGINGFACE = "huggingface"
 
 
-@dataclass(frozen=True)
 class Settings:
-    """Minimal environment config used by providers."""
+    """
+    Application settings loaded from environment variables.
+    Provider validation is performed eagerly at instantiation time
+    only when DEFAULT_PROVIDER is explicitly accessed.
+    """
+
+    def __init__(self) -> None:
+        self._default_provider: str | None = None
+        self._raw_provider: str | None = os.getenv("DEFAULT_PROVIDER")
+
+    @property
+    def default_provider(self) -> str:
+        """
+        Returns the validated default provider name.
+        Validation is lazy — runs on first access so that importing
+        settings does not break environments where provider is set inline.
+        """
+        if self._default_provider is None:
+            self._default_provider = _validate_provider(self._raw_provider)
+        return self._default_provider
+
+    @property
+    def openai_api_key(self) -> str | None:
+        return os.getenv("OPENAI_API_KEY")
+
+    @property
+    def gemini_api_key(self) -> str | None:
+        return os.getenv("GEMINI_API_KEY")
 
     openai_api_key: str | None
     gemini_api_key: str | None
