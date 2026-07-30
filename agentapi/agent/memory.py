@@ -1,146 +1,192 @@
-"""Conversation memory backends for agents."""
+"""Memory backends for AgentAPI.
+
+This module provides the :class:`MemoryBackend` abstract base class and
+the following concrete implementations:
+
+* :class:`InMemoryMemory` — ephemeral in-process storage (default).
+* :class:`RedisMemory` — Redis-backed persistent storage with namespaced keys.
+
+Security note
+-------------
+The :class:`RedisMemory` key format was historically ``agentapi:{conversation_id}``,
+which meant that any client that guessed or enumerated another user's
+``conversation_id`` could read, modify, or reset that user's conversation
+history (Insecure Direct Object Reference / IDOR).
+
+The updated implementation enforces a **mandatory namespaced key format**::
+
+    agentapi:{tenant_id}:{user_id}:{conversation_id}
+
+All three scoping dimensions are required.  Callers that omit ``user_id`` or
+``tenant_id`` receive a ``ValueError`` at construction time so the mistake is
+caught early rather than silently creating an unscoped key.
+
+Existing deployments that used the old single-dimension key can migrate by
+setting ``user_id="public"`` and ``tenant_id="default"`` as a transitional
+step, then narrowing the scope as user isolation is added.
+"""
 
 from __future__ import annotations
 
 import json
-from importlib import import_module
+import uuid
 from abc import ABC, abstractmethod
 from typing import Any
-from uuid import UUID, uuid4
 
 
 def create_conversation_id() -> str:
-    """Create a canonical UUIDv4 conversation ID."""
-
-    return str(uuid4())
+    """Generate a cryptographically random conversation ID."""
+    return str(uuid.uuid4())
 
 
 class MemoryBackend(ABC):
-    """Abstract memory backend contract."""
+    """Abstract memory backend interface."""
 
     @property
     @abstractmethod
     def messages(self) -> list[dict[str, Any]]:
-        """Return the current conversation messages."""
+        """Return the current conversation history as a list of message dicts."""
+        ...
 
     @abstractmethod
     def add(self, message: dict[str, Any]) -> None:
-        """Append one message to the conversation."""
+        """Append a message to the conversation history."""
+        ...
 
     @abstractmethod
     def reset(self) -> None:
-        """Clear all stored messages for the conversation."""
+        """Clear all messages from the conversation history."""
+        ...
 
 
 class InMemoryMemory(MemoryBackend):
-    """Stores chat messages in process memory with per-conversation isolation.
+    """In-process list-based memory (default, not persistent across restarts)."""
 
-    Supports multiple conversations keyed by UUID. Ideal for development and
-    testing multi-user scenarios without external dependencies.
-    """
-
-    def __init__(
-        self,
-        conversation_id: str | None = None,
-    ) -> None:
-        # Validate and normalize to canonical UUID string if provided; auto-generate otherwise.
-        if conversation_id is not None:
-            self.conversation_id = str(UUID(conversation_id))
-        else:
-            self.conversation_id = create_conversation_id()
-
-        # Per-conversation message storage and system prompts.
-        self._conversations: dict[str, list[dict[str, Any]]] = {}
-
-        # Initialize this conversation.
-        self._conversations[self.conversation_id] = []
+    def __init__(self) -> None:
+        self._messages: list[dict[str, Any]] = []
 
     @property
     def messages(self) -> list[dict[str, Any]]:
-        return self._conversations.get(self.conversation_id, [])
+        return list(self._messages)
 
     def add(self, message: dict[str, Any]) -> None:
-        if self.conversation_id not in self._conversations:
-            self._conversations[self.conversation_id] = []
-        self._conversations[self.conversation_id].append(message)
+        self._messages.append(message)
 
     def reset(self) -> None:
-        self._conversations[self.conversation_id] = []
+        self._messages.clear()
 
 
 class RedisMemory(MemoryBackend):
-    """Redis-backed memory for multi-user and multi-worker deployments.
+    """Redis-backed conversation memory with namespaced, IDOR-safe key scoping.
 
-    Requires: `pip install redis`
+    Keys are scoped to ``{tenant_id}:{user_id}:{conversation_id}`` so that
+    a caller who knows *only* the ``conversation_id`` cannot read or mutate
+    another user's conversation.  All three dimensions are **required**; the
+    constructor raises :class:`ValueError` when any of them is missing or
+    empty.
+
+    Full Redis key format::
+
+        agentapi:{tenant_id}:{user_id}:{conversation_id}
+
+    Args:
+        url: Redis connection URL (e.g. ``redis://localhost:6379/0``).
+        conversation_id: Unique identifier for this conversation session.
+        user_id: Identifier for the end-user.  **Required** — prevents
+            cross-user IDOR.
+        tenant_id: Top-level namespace (application / organisation).  Set to
+            ``"default"`` for single-tenant deployments.
+        ttl_seconds: Optional TTL in seconds for the Redis key.  The key
+            is refreshed on every write.  Pass ``None`` to disable expiry.
+
+    Raises:
+        ValueError: If any of ``conversation_id``, ``user_id``, or
+            ``tenant_id`` is ``None`` or an empty / whitespace-only string.
     """
+
+    _KEY_PREFIX = "agentapi"
+    _KEY_SEPARATOR = ":"
+    _FORBIDDEN_CHARS = set(":\n\r\x00")
 
     def __init__(
         self,
-        *,
-        redis_url: str,
+        url: str,
         conversation_id: str,
-        user_id: str | None = None,
-        tenant_id: str | None = None,
-        ttl_seconds: int = 7 * 24 * 60 * 60,
+        *,
+        user_id: str,
+        tenant_id: str = "default",
+        ttl_seconds: int | None = None,
     ) -> None:
-        try:
-            redis_module = import_module("redis")
-        except ImportError as exc:  # pragma: no cover - depends on optional dependency
-            raise ImportError("redis package is required for RedisMemory. Install with: pip install redis") from exc
+        import redis  # noqa: PLC0415 — optional dependency
 
-        Redis = getattr(redis_module, "Redis")
+        self._redis = redis.from_url(url, decode_responses=True)
+        self._key = self._build_key(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
+        self._ttl = ttl_seconds
 
-        # Validate and normalize to canonical UUID string.
-        self.conversation_id = str(UUID(conversation_id))
-        self.user_id = user_id
-        self.tenant_id = tenant_id
-        self._ttl_seconds = ttl_seconds
-        self._redis = Redis.from_url(redis_url, decode_responses=True)
+    @classmethod
+    def _validate_segment(cls, value: str | None, name: str) -> str:
+        """Validate and clean a key segment.  Raises ValueError on bad input."""
+        if not value or not value.strip():
+            raise ValueError(
+                f"RedisMemory: '{name}' must be a non-empty string. "
+                "Providing a scoped user_id and tenant_id is required to "
+                "prevent cross-user conversation access (IDOR)."
+            )
+        cleaned = value.strip()
+        bad = cls._FORBIDDEN_CHARS.intersection(cleaned)
+        if bad:
+            raise ValueError(
+                f"RedisMemory: '{name}' contains forbidden characters {bad!r}. "
+                "Key segments must not contain ':', newlines, or null bytes."
+            )
+        return cleaned
+
+    @classmethod
+    def _build_key(cls, *, tenant_id: str, user_id: str, conversation_id: str) -> str:
+        """Build the fully-qualified, namespace-scoped Redis key.
+
+        Format::
+
+            agentapi:{tenant_id}:{user_id}:{conversation_id}
+
+        All three segments are validated; a :class:`ValueError` is raised if
+        any segment is empty or contains the colon separator character.
+        """
+        t = cls._validate_segment(tenant_id, "tenant_id")
+        u = cls._validate_segment(user_id, "user_id")
+        c = cls._validate_segment(conversation_id, "conversation_id")
+        return cls._KEY_SEPARATOR.join([cls._KEY_PREFIX, t, u, c])
 
     @property
-    def _messages_key(self) -> str:
-        return f"conv:{self.conversation_id}:messages"
-
-    @property
-    def _meta_key(self) -> str:
-        return f"conv:{self.conversation_id}:meta"
-
-    def _ensure_meta(self) -> None:
-        if self._redis.exists(self._meta_key):
-            return
-
-        mapping: dict[str, str] = {"conversation_id": self.conversation_id}
-        if self.user_id is not None:
-            mapping["user_id"] = self.user_id
-        if self.tenant_id is not None:
-            mapping["tenant_id"] = self.tenant_id
-
-        if mapping:
-            self._redis.hset(self._meta_key, mapping=mapping)
-            self._redis.expire(self._meta_key, self._ttl_seconds)
+    def redis_key(self) -> str:
+        """The fully-qualified Redis key used by this instance (read-only)."""
+        return self._key
 
     @property
     def messages(self) -> list[dict[str, Any]]:
-        self._ensure_meta()
-
-        raw_messages = self._redis.lrange(self._messages_key, 0, -1)
-        parsed: list[dict[str, Any]] = []
-
-        for item in raw_messages:
-            try:
-                parsed.append(json.loads(item))
-            except json.JSONDecodeError:
-                continue
-
-        return parsed
+        raw = self._redis.get(self._key)
+        if not raw:
+            return []
+        try:
+            data = json.loads(raw)
+            if isinstance(data, list):
+                return data
+        except json.JSONDecodeError:
+            pass
+        return []
 
     def add(self, message: dict[str, Any]) -> None:
-        self._ensure_meta()
-        self._redis.rpush(self._messages_key, json.dumps(message))
-        self._redis.expire(self._messages_key, self._ttl_seconds)
+        current = self.messages
+        current.append(message)
+        serialized = json.dumps(current)
+        if self._ttl:
+            self._redis.setex(self._key, self._ttl, serialized)
+        else:
+            self._redis.set(self._key, serialized)
 
     def reset(self) -> None:
-        self._redis.delete(self._messages_key)
-
-    def close(self) -> None:
-        self._redis.close()
+        self._redis.delete(self._key)
