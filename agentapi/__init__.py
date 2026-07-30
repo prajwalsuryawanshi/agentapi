@@ -1,6 +1,7 @@
 """AgentAPI public interface."""
 
 from agentapi.agent.agent import Agent
+from agentapi.agent.pipeline import SequentialPipeline
 from agentapi.agent.memory import InMemoryMemory, MemoryBackend, RedisMemory, create_conversation_id
 from agentapi.core.app import AgentAPI
 from agentapi.errors import AgentConfigurationError, AgentProviderError
@@ -12,6 +13,7 @@ from pydantic import BaseModel
 
 __all__ = [
     "Agent",
+    "SequentialPipeline",
     "AgentAPI",
     "tool",
     "AgentConfigurationError",
