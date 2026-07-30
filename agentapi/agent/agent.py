@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import time
 from typing import Any, AsyncIterator, Callable
 
 from fastapi.responses import StreamingResponse
@@ -72,14 +73,21 @@ class Agent:
         for func in tools or []:
             self.add_tool(func)
 
+        logger.debug(
+            "[AgentAPI] Agent initialised",
+            extra={"provider": self.provider_name, "model": self.model, "tools": list(self._tools)},
+        )
+
     def add_tool(self, func: Callable[..., Any]) -> None:
         """Register a callable tool on the agent."""
         definition = to_tool_definition(func)
         self._tools[definition.name] = definition
+        logger.debug("[AgentAPI] Tool registered", extra={"tool": definition.name})
 
     def reset_memory(self) -> None:
         """Clear conversation state but preserve the agent system prompt."""
         self.memory.reset()
+        logger.debug("[AgentAPI] Memory reset")
 
     def _conversation_messages(self, extra_messages: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = [{"role": "system", "content": self.system_prompt}]
@@ -90,6 +98,12 @@ class Agent:
 
     async def run(self, message: str, *, max_tool_rounds: int = 3) -> str:
         """Execute a chat completion with optional tool-calling loop."""
+
+        logger.info(
+            "[AgentAPI] run() called",
+            extra={"provider": self.provider_name, "model": self.model, "message_len": len(message)},
+        )
+        _start = time.monotonic()
 
         conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
         provider = self._get_provider()
@@ -114,6 +128,10 @@ class Agent:
                 ) from exc
 
             if response.tool_calls:
+                logger.debug(
+                    "[AgentAPI] Tool calls received",
+                    extra={"count": len(response.tool_calls), "tools": [c.name for c in response.tool_calls]},
+                )
                 conversation_messages.append(
                     {
                         "role": "assistant",
@@ -136,11 +154,25 @@ class Agent:
 
             self.memory.add({"role": "user", "content": message})
             self.memory.add({"role": "assistant", "content": response.content})
+            elapsed = time.monotonic() - _start
+            logger.info(
+                "[AgentAPI] run() completed",
+                extra={
+                    "provider": self.provider_name,
+                    "model": self.model,
+                    "response_len": len(response.content or ""),
+                    "elapsed_s": round(elapsed, 3),
+                },
+            )
             return response.content
 
         fallback = "Tool loop reached max rounds without final response"
         self.memory.add({"role": "user", "content": message})
         self.memory.add({"role": "assistant", "content": fallback})
+        logger.warning(
+            "[AgentAPI] run() hit max_tool_rounds without final response",
+            extra={"max_tool_rounds": max_tool_rounds},
+        )
         return fallback
 
     def stream(self, message: str) -> StreamingResponse:
@@ -149,7 +181,7 @@ class Agent:
         Each token is split on newline boundaries and emitted as valid SSE
         frames so multi-line payloads remain a single logical SSE event.
         Provider errors are logged server-side and surfaced as a sanitized
-        ``data: [ERROR] ...\\n\\n`` event so the client never receives raw
+        ``data: [ERROR] ...\n\n`` event so the client never receives raw
         exception text.
 
         Examples::
@@ -178,6 +210,12 @@ class Agent:
     async def _stream_generator(self, message: str) -> AsyncIterator[str]:
         """Internal async generator that streams tokens from the provider."""
 
+        logger.info(
+            "[AgentAPI] stream() started",
+            extra={"provider": self.provider_name, "model": self.model, "message_len": len(message)},
+        )
+        _start = time.monotonic()
+
         conversation_messages = self._conversation_messages([{"role": "user", "content": message}])
         provider = self._get_provider()
 
@@ -205,6 +243,16 @@ class Agent:
         full_text = "".join(collected)
         self.memory.add({"role": "user", "content": message})
         self.memory.add({"role": "assistant", "content": full_text})
+        elapsed = time.monotonic() - _start
+        logger.info(
+            "[AgentAPI] stream() completed",
+            extra={
+                "provider": self.provider_name,
+                "model": self.model,
+                "tokens": len(collected),
+                "elapsed_s": round(elapsed, 3),
+            },
+        )
 
     def _create_provider(self, settings: Any) -> BaseProvider:
         custom_factory = self._custom_provider_factories.get(self.provider_name)
@@ -295,6 +343,10 @@ class Agent:
         for call in calls:
             tool_def = self._tools.get(call.name)
             if not tool_def:
+                logger.warning(
+                    "[AgentAPI] Unknown tool requested by model",
+                    extra={"tool": call.name},
+                )
                 conversation_messages.append(
                     {
                         "role": "tool",
@@ -305,14 +357,27 @@ class Agent:
                 )
                 continue
 
+            logger.debug(
+                "[AgentAPI] Executing tool",
+                extra={"tool": call.name, "args": call.arguments},
+            )
+            _tool_start = time.monotonic()
             try:
                 args = parse_tool_args(call.arguments)
                 result = tool_def.func(**args)
                 if inspect.isawaitable(result):
                     result = await result
                 output = str(result)
+                logger.debug(
+                    "[AgentAPI] Tool executed successfully",
+                    extra={"tool": call.name, "elapsed_s": round(time.monotonic() - _tool_start, 3)},
+                )
             except Exception as exc:  # noqa: BLE001
                 output = f"Tool execution failed: {exc}"
+                logger.warning(
+                    "[AgentAPI] Tool execution failed",
+                    extra={"tool": call.name, "error": str(exc)},
+                )
 
             conversation_messages.append(
                 {
