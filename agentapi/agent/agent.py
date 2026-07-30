@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import inspect
 import logging
+import time
 from typing import Any, AsyncIterator, Callable
 
 from fastapi.responses import StreamingResponse
 
 from agentapi.agent.memory import InMemoryMemory, MemoryBackend
+from agentapi.agent.observability import AgentEventHook, build_event, emit_event
 from agentapi.agent.tools import ToolDefinition, parse_tool_args, to_tool_definition
 from agentapi.config.settings import get_settings
 from agentapi.errors import AgentConfigurationError
@@ -50,6 +52,7 @@ class Agent:
         model: str | None = None,
         tools: list[Callable[..., Any]] | None = None,
         tool_calling: dict[str, Any] | None = None,
+        event_hooks: list[AgentEventHook] | None = None,
     ) -> None:
         settings = get_settings()
 
@@ -68,6 +71,7 @@ class Agent:
         self._settings = settings
         self._provider: BaseProvider | None = provider if isinstance(provider, BaseProvider) else None
         self._tools: dict[str, ToolDefinition] = {}
+        self._event_hooks = list(event_hooks or [])
 
         for func in tools or []:
             self.add_tool(func)
@@ -76,6 +80,11 @@ class Agent:
         """Register a callable tool on the agent."""
         definition = to_tool_definition(func)
         self._tools[definition.name] = definition
+
+    def add_event_hook(self, hook: AgentEventHook) -> None:
+        """Register a structured event hook for provider and tool lifecycle events."""
+
+        self._event_hooks.append(hook)
 
     def reset_memory(self) -> None:
         """Clear conversation state but preserve the agent system prompt."""
@@ -95,23 +104,7 @@ class Agent:
         provider = self._get_provider()
 
         for _ in range(max_tool_rounds + 1):
-            # Narrow the provider error wrapper to only the actual provider call.
-            try:
-                response = await provider.chat(
-                    conversation_messages,
-                    tools=self._tool_schemas(),
-                    tool_calling=self.tool_calling,
-                )
-            except AgentAPIProviderError:
-                raise
-            except Exception as exc:
-                logger.exception(
-                    "[AgentAPI] Provider error in run(). Check your API key and provider configuration."
-                )
-                raise AgentAPIProviderError(
-                    f"Provider call failed: {exc}. Check your API key and provider configuration.",
-                    original=exc,
-                ) from exc
+            response = await self._chat_with_events(provider, conversation_messages)
 
             if response.tool_calls:
                 conversation_messages.append(
@@ -182,7 +175,8 @@ class Agent:
         provider = self._get_provider()
 
         collected: list[str] = []
-
+        started = time.perf_counter()
+        await self._emit_event("provider.stream.start", **self._provider_event_fields(conversation_messages))
         try:
             async for token in provider.stream(
                 conversation_messages,
@@ -192,8 +186,22 @@ class Agent:
                 collected.append(token)
                 yield token
         except AgentAPIProviderError:
+            await self._emit_event(
+                "provider.stream.error",
+                **self._provider_event_fields(conversation_messages),
+                duration_ms=round((time.perf_counter() - started) * 1000, 3),
+                error_type=AgentAPIProviderError.__name__,
+                token_count=len(collected),
+            )
             raise
         except Exception as exc:
+            await self._emit_event(
+                "provider.stream.error",
+                **self._provider_event_fields(conversation_messages),
+                duration_ms=round((time.perf_counter() - started) * 1000, 3),
+                error_type=exc.__class__.__name__,
+                token_count=len(collected),
+            )
             logger.exception(
                 "[AgentAPI] Streaming error. Check your provider configuration and API key."
             )
@@ -203,6 +211,13 @@ class Agent:
             ) from exc
 
         full_text = "".join(collected)
+        await self._emit_event(
+            "provider.stream.end",
+            **self._provider_event_fields(conversation_messages),
+            duration_ms=round((time.perf_counter() - started) * 1000, 3),
+            token_count=len(collected),
+            content_length=len(full_text),
+        )
         self.memory.add({"role": "user", "content": message})
         self.memory.add({"role": "assistant", "content": full_text})
 
@@ -291,10 +306,71 @@ class Agent:
             return None
         return [tool.schema for tool in self._tools.values()]
 
+    async def _emit_event(self, event: str, **fields: Any) -> None:
+        if not self._event_hooks:
+            return
+        await emit_event(self._event_hooks, build_event(event, **fields))
+
+    def _provider_event_fields(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "provider": self.provider_name,
+            "model": self.model,
+            "message_count": len(messages),
+            "tools_count": len(self._tools),
+            "tool_names": tuple(sorted(self._tools)),
+        }
+
+    async def _chat_with_events(self, provider: BaseProvider, messages: list[dict[str, Any]]):
+        started = time.perf_counter()
+        await self._emit_event("provider.chat.start", **self._provider_event_fields(messages))
+        try:
+            response = await provider.chat(
+                messages,
+                tools=self._tool_schemas(),
+                tool_calling=self.tool_calling,
+            )
+        except AgentAPIProviderError:
+            await self._emit_event(
+                "provider.chat.error",
+                **self._provider_event_fields(messages),
+                duration_ms=round((time.perf_counter() - started) * 1000, 3),
+                error_type=AgentAPIProviderError.__name__,
+            )
+            raise
+        except Exception as exc:
+            await self._emit_event(
+                "provider.chat.error",
+                **self._provider_event_fields(messages),
+                duration_ms=round((time.perf_counter() - started) * 1000, 3),
+                error_type=exc.__class__.__name__,
+            )
+            logger.exception(
+                "[AgentAPI] Provider error in run(). Check your API key and provider configuration."
+            )
+            raise AgentAPIProviderError(
+                f"Provider call failed: {exc}. Check your API key and provider configuration.",
+                original=exc,
+            ) from exc
+
+        await self._emit_event(
+            "provider.chat.end",
+            **self._provider_event_fields(messages),
+            duration_ms=round((time.perf_counter() - started) * 1000, 3),
+            tool_call_count=len(response.tool_calls),
+            content_length=len(response.content or ""),
+        )
+        return response
+
     async def _execute_tool_calls(self, calls: list[ToolCall], conversation_messages: list[dict[str, Any]]) -> None:
         for call in calls:
             tool_def = self._tools.get(call.name)
             if not tool_def:
+                await self._emit_event(
+                    "tool.call.missing",
+                    tool_name=call.name,
+                    tool_call_id=call.id,
+                    arguments_length=len(call.arguments or ""),
+                )
                 conversation_messages.append(
                     {
                         "role": "tool",
@@ -305,6 +381,13 @@ class Agent:
                 )
                 continue
 
+            started = time.perf_counter()
+            await self._emit_event(
+                "tool.call.start",
+                tool_name=call.name,
+                tool_call_id=call.id,
+                arguments_length=len(call.arguments or ""),
+            )
             try:
                 args = parse_tool_args(call.arguments)
                 result = tool_def.func(**args)
@@ -313,6 +396,22 @@ class Agent:
                 output = str(result)
             except Exception as exc:  # noqa: BLE001
                 output = f"Tool execution failed: {exc}"
+                await self._emit_event(
+                    "tool.call.error",
+                    tool_name=call.name,
+                    tool_call_id=call.id,
+                    duration_ms=round((time.perf_counter() - started) * 1000, 3),
+                    error_type=exc.__class__.__name__,
+                    output_length=len(output),
+                )
+            else:
+                await self._emit_event(
+                    "tool.call.end",
+                    tool_name=call.name,
+                    tool_call_id=call.id,
+                    duration_ms=round((time.perf_counter() - started) * 1000, 3),
+                    output_length=len(output),
+                )
 
             conversation_messages.append(
                 {

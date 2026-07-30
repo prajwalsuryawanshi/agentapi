@@ -22,6 +22,7 @@ Documentation site: https://agentapi.prajwalsuryawanshi.in
 - [Memory and Providers](#memory-and-providers)
   - [Provider Configuration](#provider-configuration)
 - [Tool Calling](#tool-calling)
+- [Observability Hooks](#observability-hooks)
 - [Streaming](#streaming)
   - [Configuring SSE for proxies](#configuring-sse-for-proxies)
 - [CLI](#cli)
@@ -50,6 +51,7 @@ Documentation site: https://agentapi.prajwalsuryawanshi.in
 - Provider abstraction for `openai`, `gemini`, and `openrouter`.
 - AgentAPI app integration with `@app.chat`.
 - Automatic SSE when a chat handler returns an async iterator.
+- Opt-in structured event hooks for provider calls, tool calls, streaming, latency, and errors.
 - Built-in project scaffolding and run helper via CLI.
 - Environment-based configuration using `.env`.
 - Extensible provider system (custom instance or registered factory).
@@ -157,6 +159,33 @@ agent = Agent(
 ```
 
 Tool schemas are generated from function signatures and mapped to provider-specific tool formats internally.
+
+## Observability Hooks
+
+Attach hooks to receive structured lifecycle events without logging prompt text or tool arguments by default.
+
+```python
+from agentapi import Agent, AgentEvent
+
+
+def log_event(event: AgentEvent) -> None:
+    print(event)
+
+
+agent = Agent(
+    system_prompt="You are a helpful assistant",
+    provider="openai",
+    event_hooks=[log_event],
+)
+```
+
+Emitted events include:
+
+- `provider.chat.start`, `provider.chat.end`, and `provider.chat.error`
+- `provider.stream.start`, `provider.stream.end`, and `provider.stream.error`
+- `tool.call.start`, `tool.call.end`, `tool.call.error`, and `tool.call.missing`
+
+Events include safe metadata such as provider, model, message count, registered tool names, duration in milliseconds, token/output counts, and error type.
 
 ## Streaming
 
@@ -313,6 +342,7 @@ Implemented:
 - Provider abstraction (OpenAI, Gemini, OpenRouter)
 - Tool calling and in-memory conversation memory
 - Automatic SSE streaming on chat endpoints
+- Structured event hooks for provider and tool observability
 - CLI scaffolding and run helper
 
 ## Roadmap
