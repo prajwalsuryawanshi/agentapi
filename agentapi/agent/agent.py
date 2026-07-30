@@ -37,7 +37,25 @@ class AgentAPIProviderError(Exception):
 
 
 class Agent:
-    """Stateful agent with provider abstraction, tools, memory, and streaming."""
+    """Stateful agent with provider abstraction, tools, memory, and streaming.
+
+    Streaming API
+    -------------
+    Two streaming surfaces are available:
+
+    * :meth:`astream` — **SDK streaming**.  Returns a pure ``AsyncIterator[str]``
+      that can be iterated in any async context, including outside FastAPI::
+
+          async for chunk in agent.astream("hello"):
+              print(chunk, end="", flush=True)
+
+    * :meth:`stream` — **Web-layer helper**.  Returns a FastAPI
+      ``StreamingResponse`` for direct use in route handlers::
+
+          @app.post("/chat/stream")
+          async def chat_stream(message: str):
+              return agent.stream(message)  # FastAPI StreamingResponse
+    """
 
     _custom_provider_factories: dict[str, ProviderFactory] = {}
 
@@ -143,29 +161,68 @@ class Agent:
         self.memory.add({"role": "assistant", "content": fallback})
         return fallback
 
+    async def astream(self, message: str) -> AsyncIterator[str]:
+        """Stream model tokens as a pure async iterator (SDK surface).
+
+        Use this method when you need to consume tokens **outside** a FastAPI
+        route handler — for example in CLI tools, background tasks, or tests.
+        Unlike :meth:`stream`, this method does **not** return a
+        ``StreamingResponse``.  It is a standard Python ``AsyncIterator[str]``
+        that works in any async context.
+
+        Example::
+
+            async for chunk in agent.astream("Tell me a joke"):
+                print(chunk, end="", flush=True)
+
+        Args:
+            message: The user message to process.
+
+        Yields:
+            Token strings as they are emitted by the upstream provider.
+
+        Raises:
+            :class:`AgentAPIProviderError`: On upstream provider failure.
+        """
+        async for token in self._stream_generator(message):
+            yield token
+
     def stream(self, message: str) -> StreamingResponse:
-        """Stream model tokens as FastAPI StreamingResponse using SSE format.
+        """Stream model tokens as a FastAPI ``StreamingResponse`` (web-layer surface).
+
+        Use this method **inside** a FastAPI route handler.  It wraps
+        :meth:`astream` into the SSE wire format and returns a
+        ``StreamingResponse`` that FastAPI can serve directly.
+
+        If you need to consume tokens in a non-FastAPI context — for example
+        in CLI scripts, background workers, or unit tests — use
+        :meth:`astream` instead::
+
+            async for chunk in agent.astream(message):
+                ...
 
         Each token is split on newline boundaries and emitted as valid SSE
         frames so multi-line payloads remain a single logical SSE event.
         Provider errors are logged server-side and surfaced as a sanitized
-        ``data: [ERROR] ...\\n\\n`` event so the client never receives raw
+        ``data: [ERROR] ...\n\n`` event so the client never receives raw
         exception text.
 
-        Examples::
+        Example::
 
-            # FastAPI endpoint
+            # FastAPI route handler (preferred usage of stream())
             @app.post("/chat/stream")
             async def chat_stream(message: str):
                 return agent.stream(message)
 
-            # Direct async iteration
-            async for chunk in agent.stream(message):
-                print(chunk, end="", flush=True)
+        Args:
+            message: The user message to process.
+
+        Returns:
+            A ``StreamingResponse`` in ``text/event-stream`` format.
         """
         async def _sse_generator() -> AsyncIterator[str]:
             try:
-                async for token in self._stream_generator(message):
+                async for token in self.astream(message):
                     for line in str(token).replace("\r", "").split("\n"):
                         yield f"data: {line}\n"
                     yield "\n"
