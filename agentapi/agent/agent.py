@@ -9,6 +9,7 @@ from typing import Any, AsyncIterator, Callable
 from fastapi.responses import StreamingResponse
 
 from agentapi.agent.memory import InMemoryMemory, MemoryBackend
+from agentapi.agent.sanitize import sanitize_conversation_history
 from agentapi.agent.tools import ToolDefinition, parse_tool_args, to_tool_definition
 from agentapi.config.settings import get_settings
 from agentapi.errors import AgentConfigurationError
@@ -50,7 +51,25 @@ class Agent:
         model: str | None = None,
         tools: list[Callable[..., Any]] | None = None,
         tool_calling: dict[str, Any] | None = None,
+        ignore_incomplete_tool_calls: bool = True,
     ) -> None:
+        """Initialise the Agent.
+
+        Args:
+            system_prompt: The system prompt sent to the LLM on every turn.
+            memory: Memory backend for conversation history.
+            provider: Provider name string or a :class:`~agentapi.providers.base.BaseProvider`
+                instance.  Defaults to ``DEFAULT_PROVIDER`` from settings.
+            model: Model identifier passed to the provider.
+            tools: List of callables registered as tools.
+            tool_calling: Override default tool-calling config for the provider.
+            ignore_incomplete_tool_calls: When ``True`` (the default) any
+                orphaned ``tool_call`` entries in the conversation history are
+                silently dropped before each provider call, preventing API
+                protocol errors after network interruptions or partial stream
+                reads.  Set to ``False`` to raise a :class:`ValueError` instead
+                so that incomplete context is never silently discarded.
+        """
         settings = get_settings()
 
         self.system_prompt = system_prompt
@@ -68,6 +87,7 @@ class Agent:
         self._settings = settings
         self._provider: BaseProvider | None = provider if isinstance(provider, BaseProvider) else None
         self._tools: dict[str, ToolDefinition] = {}
+        self._ignore_incomplete_tool_calls = ignore_incomplete_tool_calls
 
         for func in tools or []:
             self.add_tool(func)
@@ -83,7 +103,15 @@ class Agent:
 
     def _conversation_messages(self, extra_messages: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = [{"role": "system", "content": self.system_prompt}]
-        messages.extend(self.memory.messages)
+        history = self.memory.messages
+        # Sanitize history to remove orphaned tool-call entries before building
+        # the context window.  This prevents provider API protocol errors when
+        # a previous streaming turn was interrupted mid-execution.
+        clean_history = sanitize_conversation_history(
+            history,
+            ignore_incomplete=self._ignore_incomplete_tool_calls,
+        )
+        messages.extend(clean_history)
         if extra_messages:
             messages.extend(extra_messages)
         return messages
@@ -149,7 +177,7 @@ class Agent:
         Each token is split on newline boundaries and emitted as valid SSE
         frames so multi-line payloads remain a single logical SSE event.
         Provider errors are logged server-side and surfaced as a sanitized
-        ``data: [ERROR] ...\\n\\n`` event so the client never receives raw
+        ``data: [ERROR] ...\n\n`` event so the client never receives raw
         exception text.
 
         Examples::
