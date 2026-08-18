@@ -118,3 +118,9 @@ Do not share one `Agent` memory across all users.
 
 This avoids context leakage across users.
 
+## Architecture Reference
+
+See [Feature and deployment scalability](architecture/scalability.md) for state
+ownership, store reuse, multi-worker deployments, conversation concurrency,
+streaming backpressure, and external multi-agent orchestration.
+

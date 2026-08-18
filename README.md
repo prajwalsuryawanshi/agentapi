@@ -21,15 +21,20 @@ Documentation site: https://agentapi.prajwalsuryawanshi.in
 - [Quick Start](#quick-start)
 - [Memory and Providers](#memory-and-providers)
 - [Provider Configuration](#provider-configuration)
+  - [Provider Configuration](#provider-configuration)
 - [Tool Calling](#tool-calling)
 - [Streaming](#streaming)
+  - [Configuring SSE for proxies](#configuring-sse-for-proxies)
 - [CLI](#cli)
 - [Custom Providers](#custom-providers)
 - [Error Handling](#error-handling)
+- [Architecture](#architecture)
+- [Examples & docs](#examples--docs)
 - [Project Structure](#project-structure)
 - [Project Status](#project-status)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
+- [Publishing](#publishing)
 - [License](#license)
 
 ## Why AgentAPI
@@ -260,6 +265,13 @@ See `examples/` for runnable examples and `docs/` for the memory abstraction gui
 
 - `examples/multi_user_example.py` — conversation-aware FastAPI app using `create_conversation_id()` and `InMemoryMemory`.
 
+## Architecture
+
+Contributors should start with [`ARCHITECTURE.md`](ARCHITECTURE.md). It links to
+the detailed package boundaries, runtime flows, object/class/method/attribute
+reference, scalability model, and change checklists under
+[`docs/architecture/`](docs/architecture/index.md).
+
 ## Project Structure
 
 ```text
@@ -283,6 +295,13 @@ agentapi/
     openrouter.py
 examples/
   main.py
+docs/
+  architecture/
+    index.md
+    runtime.md
+    object-model.md
+    scalability.md
+    contributing.md
 ```
 
 ## Project Status
@@ -308,7 +327,9 @@ Implemented:
 
 ## Contributing
 
-Contributions are welcome. See `CONTRIBUTING.md` for setup and PR workflow.
+Contributions are welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup and
+PR workflow, then read [`ARCHITECTURE.md`](ARCHITECTURE.md) to identify the
+correct extension boundary before changing framework code.
 
 ## Publishing
 

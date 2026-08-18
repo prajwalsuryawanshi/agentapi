@@ -50,3 +50,10 @@ async def stream_chat(message: str):
 ```bash
 curl -N -X POST "http://127.0.0.1:8000/stream?message=hello"
 ```
+
+## Architecture Reference
+
+AgentAPI has separate Agent-owned and application-adapted SSE paths. Contributors
+should read [Streaming has two adaptation levels](architecture/runtime.md#streaming-has-two-adaptation-levels),
+[Streaming scalability](architecture/scalability.md#streaming-scalability), and
+the [streaming change checklist](architecture/contributing.md#changing-streaming-or-decorators).

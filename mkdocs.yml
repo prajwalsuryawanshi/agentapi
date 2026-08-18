@@ -8,6 +8,12 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Getting Started: getting-started.md
+  - Architecture:
+      - Overview: architecture/index.md
+      - Runtime and Data Flows: architecture/runtime.md
+      - Object Model: architecture/object-model.md
+      - Scalability: architecture/scalability.md
+      - Contributor Change Guide: architecture/contributing.md
   - Memory: memory.md
   - Providers: providers.md
   - Tool Calling: tools.md

@@ -68,3 +68,10 @@ Then use it:
 ```python
 agent = Agent(system_prompt="You are helpful", provider="myprovider")
 ```
+
+## Architecture Reference
+
+Contributors adding or changing a provider should read the
+[provider object model](architecture/object-model.md#provider-protocol-and-models),
+[translation flow](architecture/runtime.md#provider-translation-flow), and
+[provider change checklist](architecture/contributing.md#adding-a-provider).

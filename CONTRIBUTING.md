@@ -2,6 +2,16 @@
 
 Thanks for your interest in contributing to AgentAPI.
 
+## Architecture First
+
+Before changing framework code, read [`ARCHITECTURE.md`](ARCHITECTURE.md). The
+detailed guides under [`docs/architecture/`](docs/architecture/index.md) cover
+package boundaries, runtime flows, the object model, scalability, and
+change-specific verification checklists.
+
+Use the [contributor change guide](docs/architecture/contributing.md) to find the
+module that owns your change and the other public surfaces that must stay aligned.
+
 ## Development Setup
 
 1. Fork and clone the repository.

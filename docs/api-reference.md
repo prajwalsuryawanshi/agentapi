@@ -82,3 +82,9 @@ Raised when required runtime configuration (such as API keys) is missing.
 ### `AgentProviderError`
 
 Raised when upstream provider calls fail. Includes status-code context.
+
+## Architecture Reference
+
+For internal and extension APIs, see the complete
+[object model](architecture/object-model.md). For control flow and error
+boundaries, see [runtime and data flows](architecture/runtime.md).

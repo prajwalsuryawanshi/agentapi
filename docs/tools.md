@@ -82,3 +82,10 @@ def get_inventory(sku: str) -> str:
 ## Parsing and Validation
 
 AgentAPI safely parses tool arguments from model JSON payloads before execution.
+
+## Architecture Reference
+
+For schema generation, execution ordering, persistence behavior, and provider
+translation requirements, see the [tool runtime flow](architecture/runtime.md#tool-registration-and-execution),
+[tool object model](architecture/object-model.md#tool-objects-and-functions), and
+[tool contribution guide](architecture/contributing.md#changing-tools-or-the-tool-loop).
