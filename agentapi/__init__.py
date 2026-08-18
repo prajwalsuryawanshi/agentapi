@@ -1,7 +1,7 @@
 """AgentAPI public interface."""
 
 from agentapi.agent.agent import Agent
-from agentapi.agent.memory import InMemoryMemory, MemoryBackend, RedisMemory, create_conversation_id
+from agentapi.agent.memory import InMemoryMemory, MemoryBackend, RedisMemory, FileMemory, create_conversation_id
 from agentapi.core.app import AgentAPI
 from agentapi.errors import AgentConfigurationError, AgentProviderError
 from agentapi.agent.tools import tool
@@ -20,6 +20,7 @@ __all__ = [
     "MemoryBackend",
     "InMemoryMemory",
     "RedisMemory",
+    "FileMemory",
     "create_conversation_id",
     "FastAPI",
     "Depends",

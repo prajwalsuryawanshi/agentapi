@@ -144,3 +144,58 @@ class RedisMemory(MemoryBackend):
 
     def close(self) -> None:
         self._redis.close()
+
+
+class FileMemory(MemoryBackend):
+    """File-backed persistent conversation memory.
+
+    Stores conversation history in a local directory as JSON files. Useful for
+    CLI applications, quick prototyping, and lightweight persistence.
+    """
+
+    def __init__(
+        self,
+        conversation_id: str | None = None,
+        storage_dir: str = "./memory_store",
+    ) -> None:
+        import os
+
+        # Validate and normalize to canonical UUID string if provided; auto-generate otherwise.
+        if conversation_id is not None:
+            self.conversation_id = str(UUID(conversation_id))
+        else:
+            self.conversation_id = create_conversation_id()
+
+        self.storage_dir = storage_dir
+        self.file_path = os.path.join(self.storage_dir, f"{self.conversation_id}.json")
+
+        # Automatically create storage directory if it doesn't exist.
+        os.makedirs(self.storage_dir, exist_ok=True)
+
+    @property
+    def messages(self) -> list[dict[str, Any]]:
+        import os
+        if not os.path.exists(self.file_path):
+            return []
+        try:
+            with open(self.file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return []
+
+    def add(self, message: dict[str, Any]) -> None:
+        messages = self.messages
+        messages.append(message)
+        try:
+            with open(self.file_path, "w", encoding="utf-8") as f:
+                json.dump(messages, f, indent=4, ensure_ascii=False)
+        except OSError:
+            pass
+
+    def reset(self) -> None:
+        import os
+        if os.path.exists(self.file_path):
+            try:
+                os.remove(self.file_path)
+            except OSError:
+                pass
