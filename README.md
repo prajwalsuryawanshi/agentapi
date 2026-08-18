@@ -20,6 +20,7 @@ Documentation site: https://agentapi.prajwalsuryawanshi.in
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Memory and Providers](#memory-and-providers)
+- [Provider Configuration](#provider-configuration)
   - [Provider Configuration](#provider-configuration)
 - [Tool Calling](#tool-calling)
 - [Streaming](#streaming)
