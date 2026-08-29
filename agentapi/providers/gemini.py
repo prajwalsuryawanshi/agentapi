@@ -23,6 +23,11 @@ class GeminiProvider(BaseProvider):
         self.model = model
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
 
+    def default_tool_calling(self) -> dict[str, Any]:
+        """Gemini expects function calling config in toolConfig."""
+
+        return {"mode": "AUTO"}
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -223,7 +228,7 @@ class GeminiProvider(BaseProvider):
             if declarations:
                 payload["tools"] = [{"function_declarations": declarations}]
 
-                tool_calling = tool_calling or {}
+                tool_calling = {**self.default_tool_calling(), **(tool_calling or {})}
                 function_calling_config: dict[str, Any] = {}
 
                 mode = tool_calling.get("mode")
