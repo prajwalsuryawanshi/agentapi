@@ -102,8 +102,9 @@ def _build_openai_tool_schema(
             "description": f"Parameter: {param_name}",
         }
 
-        # Strict mode expects required to include all declared properties.
-        required.append(param_name)
+        # Strict mode: only parameters without a default are required.
+        if param.default is inspect._empty:
+            required.append(param_name)
 
     return {
         "type": "function",
