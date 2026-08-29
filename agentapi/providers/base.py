@@ -39,7 +39,7 @@ class BaseProvider(ABC):
         pass
 
     @abstractmethod
-    def stream(
+    async def stream(
         self,
         messages: list[dict[str, Any]],
         *,
