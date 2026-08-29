@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import time
 from typing import Any, AsyncIterator, Callable
 
 from fastapi.responses import StreamingResponse
@@ -21,6 +22,7 @@ from agentapi.providers.huggingface import HuggingFaceProvider
 logger = logging.getLogger(__name__)
 
 ProviderFactory = Callable[["Agent", Any, str], BaseProvider]
+AgentEventHandler = Callable[[dict[str, Any]], Any]
 
 
 class AgentAPIUsageError(Exception):
@@ -50,6 +52,7 @@ class Agent:
         model: str | None = None,
         tools: list[Callable[..., Any]] | None = None,
         tool_calling: dict[str, Any] | None = None,
+        event_handler: AgentEventHandler | None = None,
     ) -> None:
         settings = get_settings()
 
@@ -68,6 +71,7 @@ class Agent:
         self._settings = settings
         self._provider: BaseProvider | None = provider if isinstance(provider, BaseProvider) else None
         self._tools: dict[str, ToolDefinition] = {}
+        self._event_handler = event_handler
 
         for func in tools or []:
             self.add_tool(func)
@@ -96,17 +100,51 @@ class Agent:
 
         for _ in range(max_tool_rounds + 1):
             # Narrow the provider error wrapper to only the actual provider call.
+            provider_started_at = time.perf_counter()
+            await self._emit_event(
+                "provider_call_start",
+                provider=self.provider_name,
+                model=self.model,
+                mode="run",
+            )
             try:
                 response = await provider.chat(
                     conversation_messages,
                     tools=self._tool_schemas(),
                     tool_calling=self.tool_calling,
                 )
+                await self._emit_event(
+                    "provider_call_end",
+                    provider=self.provider_name,
+                    model=self.model,
+                    mode="run",
+                    duration_ms=self._elapsed_ms(provider_started_at),
+                    tool_call_count=len(response.tool_calls),
+                    content_length=len(response.content or ""),
+                )
             except AgentAPIProviderError:
+                await self._emit_event(
+                    "error",
+                    provider=self.provider_name,
+                    model=self.model,
+                    mode="run",
+                    stage="provider_call",
+                    error_type="AgentAPIProviderError",
+                    duration_ms=self._elapsed_ms(provider_started_at),
+                )
                 raise
             except Exception as exc:
                 logger.exception(
                     "[AgentAPI] Provider error in run(). Check your API key and provider configuration."
+                )
+                await self._emit_event(
+                    "error",
+                    provider=self.provider_name,
+                    model=self.model,
+                    mode="run",
+                    stage="provider_call",
+                    error_type=exc.__class__.__name__,
+                    duration_ms=self._elapsed_ms(provider_started_at),
                 )
                 raise AgentAPIProviderError(
                     f"Provider call failed: {exc}. Check your API key and provider configuration.",
@@ -182,6 +220,15 @@ class Agent:
         provider = self._get_provider()
 
         collected: list[str] = []
+        stream_started_at = time.perf_counter()
+        token_count = 0
+
+        await self._emit_event(
+            "provider_call_start",
+            provider=self.provider_name,
+            model=self.model,
+            mode="stream",
+        )
 
         try:
             async for token in provider.stream(
@@ -190,12 +237,33 @@ class Agent:
                 tool_calling=self.tool_calling,
             ):
                 collected.append(token)
+                token_count += 1
                 yield token
         except AgentAPIProviderError:
+            await self._emit_event(
+                "error",
+                provider=self.provider_name,
+                model=self.model,
+                mode="stream",
+                stage="provider_stream",
+                error_type="AgentAPIProviderError",
+                duration_ms=self._elapsed_ms(stream_started_at),
+                token_count=token_count,
+            )
             raise
         except Exception as exc:
             logger.exception(
                 "[AgentAPI] Streaming error. Check your provider configuration and API key."
+            )
+            await self._emit_event(
+                "error",
+                provider=self.provider_name,
+                model=self.model,
+                mode="stream",
+                stage="provider_stream",
+                error_type=exc.__class__.__name__,
+                duration_ms=self._elapsed_ms(stream_started_at),
+                token_count=token_count,
             )
             raise AgentAPIProviderError(
                 f"Streaming failed: {exc}",
@@ -203,6 +271,15 @@ class Agent:
             ) from exc
 
         full_text = "".join(collected)
+        await self._emit_event(
+            "provider_call_end",
+            provider=self.provider_name,
+            model=self.model,
+            mode="stream",
+            duration_ms=self._elapsed_ms(stream_started_at),
+            token_count=token_count,
+            content_length=len(full_text),
+        )
         self.memory.add({"role": "user", "content": message})
         self.memory.add({"role": "assistant", "content": full_text})
 
@@ -305,6 +382,14 @@ class Agent:
                 )
                 continue
 
+            tool_started_at = time.perf_counter()
+            await self._emit_event(
+                "tool_execution_start",
+                provider=self.provider_name,
+                model=self.model,
+                tool_name=call.name,
+                tool_call_id=call.id,
+            )
             try:
                 args = parse_tool_args(call.arguments)
                 result = tool_def.func(**args)
@@ -312,7 +397,27 @@ class Agent:
                     result = await result
                 output = str(result)
             except Exception as exc:  # noqa: BLE001
+                await self._emit_event(
+                    "error",
+                    provider=self.provider_name,
+                    model=self.model,
+                    stage="tool_execution",
+                    tool_name=call.name,
+                    tool_call_id=call.id,
+                    error_type=exc.__class__.__name__,
+                    duration_ms=self._elapsed_ms(tool_started_at),
+                )
                 output = f"Tool execution failed: {exc}"
+            else:
+                await self._emit_event(
+                    "tool_execution_end",
+                    provider=self.provider_name,
+                    model=self.model,
+                    tool_name=call.name,
+                    tool_call_id=call.id,
+                    duration_ms=self._elapsed_ms(tool_started_at),
+                    output_length=len(output),
+                )
 
             conversation_messages.append(
                 {
@@ -322,3 +427,22 @@ class Agent:
                     "content": output,
                 }
             )
+
+    async def _emit_event(self, event: str, **metadata: Any) -> None:
+        if not self._event_handler:
+            return
+
+        payload = {
+            "event": event,
+            **metadata,
+        }
+        try:
+            result = self._event_handler(payload)
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            logger.exception("[AgentAPI] Event handler failed for event '%s'.", event)
+
+    @staticmethod
+    def _elapsed_ms(started_at: float) -> float:
+        return round((time.perf_counter() - started_at) * 1000, 3)
