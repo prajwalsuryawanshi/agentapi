@@ -3,6 +3,7 @@
 from __future__ import annotations
 import inspect
 import json
+import re
 import types
 from dataclasses import dataclass
 from typing import Any, get_args, get_origin
@@ -77,6 +78,114 @@ def _compose_tool_description(
     return base_description
 
 
+_GOOGLE_PARAM_RE = re.compile(
+    r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?:\s*\([^)]*\))?\s*:\s*(?P<description>.*)$"
+)
+_NUMPY_PARAM_RE = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*:\s*.+$")
+
+
+def _parse_docstring_param_descriptions(func: Callable[..., Any]) -> dict[str, str]:
+    """Return parameter descriptions parsed from supported docstring styles."""
+    docstring = inspect.getdoc(func)
+    if not docstring:
+        return {}
+
+    lines = docstring.splitlines()
+    return {
+        **_parse_google_param_descriptions(lines),
+        **_parse_numpy_param_descriptions(lines),
+    }
+
+
+def _parse_google_param_descriptions(lines: list[str]) -> dict[str, str]:
+    """Parse Args/Arguments/Parameters sections written in Google style."""
+    descriptions: dict[str, str] = {}
+    section_names = {"args:", "arguments:", "parameters:"}
+    in_section = False
+    current_name: str | None = None
+    current_parts: list[str] = []
+
+    def flush() -> None:
+        nonlocal current_name, current_parts
+        if current_name and current_parts:
+            descriptions[current_name] = " ".join(part.strip() for part in current_parts if part.strip())
+        current_name = None
+        current_parts = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not in_section:
+            if stripped.lower() in section_names:
+                in_section = True
+            continue
+
+        if not stripped:
+            flush()
+            continue
+        if not line.startswith((" ", "\t")) and stripped.endswith(":"):
+            flush()
+            break
+
+        match = _GOOGLE_PARAM_RE.match(stripped)
+        if match:
+            flush()
+            current_name = match.group("name")
+            current_parts = [match.group("description")]
+        elif current_name:
+            current_parts.append(stripped)
+
+    flush()
+    return descriptions
+
+
+def _parse_numpy_param_descriptions(lines: list[str]) -> dict[str, str]:
+    """Parse NumPy-style Parameters sections into schema descriptions."""
+    descriptions: dict[str, str] = {}
+    in_section = False
+    expecting_rule = False
+    current_name: str | None = None
+    current_parts: list[str] = []
+
+    def flush() -> None:
+        nonlocal current_name, current_parts
+        if current_name and current_parts:
+            descriptions[current_name] = " ".join(part.strip() for part in current_parts if part.strip())
+        current_name = None
+        current_parts = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not in_section:
+            if stripped.lower() == "parameters":
+                expecting_rule = True
+            elif expecting_rule:
+                if set(stripped) == {"-"} and len(stripped) >= 3:
+                    in_section = True
+                else:
+                    expecting_rule = False
+            continue
+
+        if not stripped:
+            continue
+        if set(stripped) == {"-"} and len(stripped) >= 3:
+            flush()
+            break
+
+        match = _NUMPY_PARAM_RE.match(stripped)
+        if match and not line.startswith((" ", "\t")):
+            flush()
+            current_name = match.group("name")
+            current_parts = []
+        elif current_name and line.startswith((" ", "\t")):
+            current_parts.append(stripped)
+        elif not line.startswith((" ", "\t")):
+            flush()
+            break
+
+    flush()
+    return descriptions
+
+
 def _build_openai_tool_schema(
     func: Callable[..., Any],
     *,
@@ -85,6 +194,8 @@ def _build_openai_tool_schema(
     name: str | None = None,
 ) -> dict[str, Any]:
     signature = inspect.signature(func)
+    tool_name = (name or func.__name__).strip()
+    param_descriptions = _parse_docstring_param_descriptions(func)
     properties: dict[str, Any] = {}
     required: list[str] = []
 
@@ -99,7 +210,7 @@ def _build_openai_tool_schema(
 
         properties[param_name] = {
             "type": param_type,
-            "description": f"Parameter: {param_name}",
+            "description": param_descriptions.get(param_name, f"Parameter: {param_name}"),
         }
 
         # Strict mode expects required to include all declared properties.
@@ -108,7 +219,7 @@ def _build_openai_tool_schema(
     return {
         "type": "function",
         "function": {
-            "name": (name or func.__name__).strip(),
+            "name": tool_name,
             "description": _compose_tool_description(func, description=description, context=context),
             "strict": True,
             "parameters": {
