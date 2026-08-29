@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 from typing import Any, AsyncIterator, Callable
@@ -292,18 +293,15 @@ class Agent:
         return [tool.schema for tool in self._tools.values()]
 
     async def _execute_tool_calls(self, calls: list[ToolCall], conversation_messages: list[dict[str, Any]]) -> None:
-        for call in calls:
+        async def run_tool_call(call: ToolCall) -> dict[str, Any]:
             tool_def = self._tools.get(call.name)
             if not tool_def:
-                conversation_messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call.id,
-                        "name": call.name,
-                        "content": f"Tool '{call.name}' is not registered",
-                    }
-                )
-                continue
+                return {
+                    "role": "tool",
+                    "tool_call_id": call.id,
+                    "name": call.name,
+                    "content": f"Tool '{call.name}' is not registered",
+                }
 
             try:
                 args = parse_tool_args(call.arguments)
@@ -314,11 +312,15 @@ class Agent:
             except Exception as exc:  # noqa: BLE001
                 output = f"Tool execution failed: {exc}"
 
-            conversation_messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": call.id,
-                    "name": call.name,
-                    "content": output,
-                }
-            )
+            return {
+                "role": "tool",
+                "tool_call_id": call.id,
+                "name": call.name,
+                "content": output,
+            }
+
+        if self.tool_calling.get("parallel_tool_calls") and self._get_provider().supports_parallel_tool_calls:
+            tool_messages = await asyncio.gather(*(run_tool_call(call) for call in calls))
+        else:
+            tool_messages = [await run_tool_call(call) for call in calls]
+        conversation_messages.extend(tool_messages)

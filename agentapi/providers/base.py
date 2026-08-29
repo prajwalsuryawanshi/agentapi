@@ -28,6 +28,8 @@ class ProviderResponse:
 class BaseProvider(ABC):
     """Abstract provider contract used by Agent."""
 
+    supports_parallel_tool_calls = False
+
     @abstractmethod
     async def chat(
         self,
