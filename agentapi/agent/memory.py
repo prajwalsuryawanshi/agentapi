@@ -57,7 +57,7 @@ class InMemoryMemory(MemoryBackend):
 
     @property
     def messages(self) -> list[dict[str, Any]]:
-        return self._conversations.get(self.conversation_id, [])
+        return list(self._conversations.get(self.conversation_id, []))
 
     def add(self, message: dict[str, Any]) -> None:
         if self.conversation_id not in self._conversations:
