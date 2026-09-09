@@ -3,6 +3,7 @@
 from __future__ import annotations
 import inspect
 import json
+import re
 import types
 from dataclasses import dataclass
 from typing import Any, get_args, get_origin
@@ -62,6 +63,98 @@ def _json_type(annotation: Any) -> str | list[str]:
     return "string"
 
 
+# ---------------------------------------------------------------------------
+# Docstring parameter description parsing
+# ---------------------------------------------------------------------------
+
+_GOOGLE_PARAM_RE = re.compile(
+    r"^\s{4,}(?P<name>\w+)\s*(?:\(.*?\))?\s*:\s*(?P<desc>.+)",
+    re.MULTILINE,
+)
+
+_NUMPY_PARAM_RE = re.compile(
+    # Matches 'param_name : type_annotation\n    description text'
+    r"^\s{0,4}(?P<name>\w+)\s*:\s*.*?\n\s+(?P<desc>[^\n]+)",
+    re.MULTILINE,
+)
+
+_RST_PARAM_RE = re.compile(
+    r"^\s*:param\s+(?:\w+\s+)?(?P<name>\w+):\s*(?P<desc>.+)",
+    re.MULTILINE,
+)
+
+
+def _parse_docstring_params(docstring: str) -> dict[str, str]:
+    """Extract parameter descriptions from a docstring.
+
+    Supports three common styles:
+
+    * **Google style** (``Args:`` section with 4-space-indented entries)
+    * **NumPy style** (``Parameters`` section followed by ``name : type``
+      and an indented description on the next line)
+    * **Sphinx / reST style** (``:param name: description`` directives)
+
+    Returns a ``{param_name: description}`` mapping.  If a style is not
+    detected, or parsing fails, an empty dict is returned — callers fall
+    back to the generic ``"Parameter: {name}"`` description.
+    """
+    if not docstring:
+        return {}
+
+    params: dict[str, str] = {}
+
+    # --- Google style ---
+    # Look for "Args:" or "Arguments:" sections.
+    google_section_re = re.compile(
+        r"(?:Args|Arguments|Parameters)\s*:\n(?P<body>(?:[ \t]+.+\n?)*)",
+        re.IGNORECASE,
+    )
+    for section_match in google_section_re.finditer(docstring):
+        body = section_match.group("body")
+        for param_match in _GOOGLE_PARAM_RE.finditer(body):
+            name = param_match.group("name")
+            desc = param_match.group("desc").strip()
+            if name and desc:
+                params[name] = desc
+
+    if params:
+        return params
+
+    # --- reST / Sphinx style ---
+    for match in _RST_PARAM_RE.finditer(docstring):
+        name = match.group("name")
+        desc = match.group("desc").strip()
+        if name and desc:
+            params[name] = desc
+
+    if params:
+        return params
+
+    # --- NumPy style ---
+    # Look for "Parameters" section separated by a dashed underline.
+    numpy_section_re = re.compile(
+        r"Parameters\n\s*[-]+\n(?P<body>(?:(?!\n\n\w).)+)",
+        re.DOTALL | re.IGNORECASE,
+    )
+    for section_match in numpy_section_re.finditer(docstring):
+        body = section_match.group("body")
+        for param_match in _NUMPY_PARAM_RE.finditer(body):
+            name = param_match.group("name")
+            desc = param_match.group("desc").strip()
+            if name and desc:
+                params[name] = desc
+
+    return params
+
+
+def _param_description(param_name: str, docstring_params: dict[str, str]) -> str:
+    """Return parsed docstring description or generic fallback."""
+    return docstring_params.get(param_name) or f"Parameter: {param_name}"
+
+
+# ---------------------------------------------------------------------------
+
+
 def _compose_tool_description(
     func: Callable[..., Any],
     *,
@@ -88,6 +181,10 @@ def _build_openai_tool_schema(
     properties: dict[str, Any] = {}
     required: list[str] = []
 
+    # Parse docstring once for all parameters.
+    raw_docstring = inspect.getdoc(func) or ""
+    docstring_params = _parse_docstring_params(raw_docstring)
+
     for param_name, param in signature.parameters.items():
         annotation = param.annotation
         if annotation is inspect._empty:
@@ -99,7 +196,8 @@ def _build_openai_tool_schema(
 
         properties[param_name] = {
             "type": param_type,
-            "description": f"Parameter: {param_name}",
+            # Use parsed docstring description; fall back to generic if not found.
+            "description": _param_description(param_name, docstring_params),
         }
 
         # Strict mode expects required to include all declared properties.
