@@ -6,6 +6,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
 
+from agentapi.observability import TokenUsage
+
 
 @dataclass
 class ToolCall:
@@ -23,6 +25,7 @@ class ProviderResponse:
     content: str
     tool_calls: list[ToolCall]
     raw_message: dict[str, Any]
+    usage: TokenUsage | None = None
 
 
 class BaseProvider(ABC):

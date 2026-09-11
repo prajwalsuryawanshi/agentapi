@@ -10,6 +10,7 @@ import httpx
 
 from agentapi.errors import AgentProviderError, AgentConfigurationError
 from agentapi.providers.base import BaseProvider, ProviderResponse, ToolCall
+from agentapi.observability import TokenUsage, safe_int_usage
 
 
 class GeminiProvider(BaseProvider):
@@ -50,7 +51,14 @@ class GeminiProvider(BaseProvider):
 
         content = self._extract_text(data)
         tool_calls = self._extract_tool_calls(data)
-        return ProviderResponse(content=content, tool_calls=tool_calls, raw_message=data)
+        usage = self._extract_usage(data)
+
+        return ProviderResponse(
+            content=content,
+            tool_calls=tool_calls,
+            raw_message=data,
+            usage=usage,
+        )
 
     async def stream(
         self,
@@ -308,3 +316,17 @@ class GeminiProvider(BaseProvider):
         parts = candidates[0].get("content", {}).get("parts") or []
         tokens = [part.get("text", "") for part in parts if part.get("text")]
         return "".join(tokens)
+
+    def _extract_usage(self, data: dict[str, Any]) -> TokenUsage | None:
+        """Extract and normalize token usage from Gemini response metadata."""
+        raw_usage = data.get("usageMetadata")
+        if not isinstance(raw_usage, dict):
+            return None
+        prompt = safe_int_usage(raw_usage.get("promptTokenCount"))
+        completion = safe_int_usage(raw_usage.get("candidatesTokenCount"))
+        total = safe_int_usage(raw_usage.get("totalTokenCount"), default=prompt + completion)
+        return TokenUsage(
+            prompt_tokens=prompt,
+            completion_tokens=completion,
+            total_tokens=total,
+        )
