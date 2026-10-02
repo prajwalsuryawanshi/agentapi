@@ -78,10 +78,8 @@ Common examples:
 
 ```python
 conversation_id = create_conversation_id()
-conversation_id = f"user:{user.id}"
-conversation_id = f"tenant:{tenant.id}:user:{user.id}"
 ```
-
+Store mappings between users/sessions and conversation IDs separately in your application layer if needed.
 ## Using Memory in an App
 
 Create one memory object per session or conversation and pass it into the agent:
