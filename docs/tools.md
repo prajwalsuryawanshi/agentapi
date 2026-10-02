@@ -56,6 +56,49 @@ agent = Agent(
 4. Tool outputs are appended to conversation memory.
 5. Agent asks provider again for final response.
 
+## Authorize Tool Calls
+
+Model-selected tools can be influenced by user prompts and previous tool output.
+For sensitive tools, add an `authorize_tool` callback that inspects every tool call
+before the Python function runs.
+
+```python
+from agentapi import Agent, tool
+from agentapi.providers.base import ToolCall
+
+
+@tool
+def delete_account(account_id: str) -> str:
+    return f"deleted {account_id}"
+
+
+def authorize(call: ToolCall) -> bool | str:
+    if call.name == "delete_account":
+        return "This tool requires an explicit admin approval step."
+    return True
+
+
+agent = Agent(
+    system_prompt="You are a safe support assistant.",
+    provider="openai",
+    tools=[delete_account],
+    authorize_tool=authorize,
+)
+```
+
+Return `True` to allow execution, `False` to deny with a default message, or a
+string to deny with that custom message. Denied calls are returned to the model as
+tool results, so the normal tool loop can continue without executing unsafe code.
+
+## Security Notes
+
+- Treat tool calls as untrusted until your application authorizes them.
+- Expose only the tools needed for the current route or user role.
+- Use `authorize_tool` for side-effecting actions such as deletes, payments,
+  outbound email, or privileged data access.
+- Treat tool output as untrusted content before sending it back to the model.
+- Validate parsed arguments inside the tool, especially IDs and tenant boundaries.
+
 ## Recommended Tool Authoring
 
 - Add explicit `description` and `context` for model-facing intent.
