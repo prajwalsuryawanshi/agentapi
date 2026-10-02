@@ -9,10 +9,6 @@ agent = Agent(
     provider="openai",
 )
 
-agent2 = Agent(
-    system_prompt="You are a chess master who loves to teach chess", 
-    provider="openai",
-)
 
 @app.chat("/chat")
 async def chat(message: str):
