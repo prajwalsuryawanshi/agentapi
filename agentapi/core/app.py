@@ -27,6 +27,8 @@ from agentapi.agent.memory import InMemoryMemory
 
 F = TypeVar("F", bound=Callable[..., Any])
 
+class SSEStreamingResponse(StreamingResponse):
+    media_type = "text/event-stream"
 
 class AgentAPI(FastAPI):
     """A small FastAPI extension with AgentAPI-focused decorators."""
@@ -446,7 +448,25 @@ window.addEventListener('load', function () {
 
             setattr(endpoint, "__signature__", signature)
 
-            self.post(path, **kwargs)(endpoint)
+            self.add_api_route(
+    path,
+    endpoint,
+    methods=["POST"],
+    response_class=SSEStreamingResponse,
+    responses={
+        200: {
+            "description": "Server-Sent Events stream",
+            "content": {
+                "text/event-stream": {
+                    "schema": {
+                        "type": "string"
+                    }
+                }
+            },
+        }
+    },
+    **kwargs,
+)
             return func
 
         return decorator
