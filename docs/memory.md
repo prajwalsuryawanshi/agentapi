@@ -77,9 +77,12 @@ agent = Agent(
 Common examples:
 
 ```python
+import uuid
+
 conversation_id = create_conversation_id()
-conversation_id = f"user:{user.id}"
-conversation_id = f"tenant:{tenant.id}:user:{user.id}"
+# Generate a deterministic UUID for authenticated users
+conversation_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"user:{user.id}"))
+conversation_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"tenant:{tenant.id}:user:{user.id}"))
 ```
 
 ## Using Memory in an App
