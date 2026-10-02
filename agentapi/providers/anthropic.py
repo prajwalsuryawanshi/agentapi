@@ -2,13 +2,14 @@
 
 import json
 from typing import Any, AsyncIterator
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropic, APIStatusError, APIConnectionError, APITimeoutError
 
 from agentapi.errors import AgentProviderError
 from agentapi.providers.base import BaseProvider, ProviderResponse, ToolCall
 
 class AnthropicProvider(BaseProvider):
     def __init__(self, api_key: str, model: str) -> None:
+        """Initialize the Anthropic provider with an API key and model."""
         self.client = AsyncAnthropic(api_key=api_key)
         self.model = model
 
@@ -47,6 +48,7 @@ class AnthropicProvider(BaseProvider):
         return anthropic_tools
 
     async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, tool_calling: dict[str, Any] | None = None) -> ProviderResponse:
+        """Execute a single chat completion request against the Anthropic API."""
         system, formatted_messages = self._format_messages(messages)
         formatted_tools = self._format_tools(tools)
         
@@ -61,7 +63,11 @@ class AnthropicProvider(BaseProvider):
             
         try:
             response = await self.client.messages.create(**kwargs)
-        except Exception as exc:
+        except APIStatusError as exc:
+            raise AgentProviderError(
+                f"Anthropic provider error for model '{self.model}': {type(exc).__name__}"
+            ) from None
+        except (APIConnectionError, APITimeoutError) as exc:
             raise AgentProviderError(
                 f"Anthropic provider error for model '{self.model}': {type(exc).__name__}"
             ) from None
@@ -82,6 +88,7 @@ class AnthropicProvider(BaseProvider):
         return ProviderResponse(content=content, tool_calls=tool_calls, raw_message=response.model_dump())
 
     async def stream(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, tool_calling: dict[str, Any] | None = None) -> AsyncIterator[str]:
+        """Stream a chat completion request from the Anthropic API."""
         system, formatted_messages = self._format_messages(messages)
         
         kwargs = {
@@ -95,7 +102,11 @@ class AnthropicProvider(BaseProvider):
             async with self.client.messages.stream(**kwargs) as stream:
                 async for text in stream.text_stream:
                     yield text
-        except Exception as exc:
+        except APIStatusError as exc:
+            raise AgentProviderError(
+                f"Anthropic stream provider error for model '{self.model}': {type(exc).__name__}"
+            ) from None
+        except (APIConnectionError, APITimeoutError) as exc:
             raise AgentProviderError(
                 f"Anthropic stream provider error for model '{self.model}': {type(exc).__name__}"
             ) from None
