@@ -1,12 +1,21 @@
 """Minimal AgentAPI example."""
 
-from agentapi import Agent, AgentAPI , tool
+from agentapi import Agent, AgentAPI, tool
 
 app = AgentAPI()
+
+
+@tool
+def get_date() -> str:
+    from datetime import datetime
+
+    return datetime.now().isoformat()
+
 
 agent = Agent(
     system_prompt="You are a helpful assistant",
     provider="openai",
+    tools=[get_date],
 )
 
 agent2 = Agent(
@@ -22,9 +31,3 @@ async def chat(message: str):
 @app.chat("/stream")
 async def stream_chat(message: str):
     return agent.stream(message)
-
-@tool
-def get_date():
-    from datetime import datetime
-
-    return datetime.now().isoformat()
