@@ -42,14 +42,16 @@ class Agent:
     _custom_provider_factories: dict[str, ProviderFactory] = {}
 
     def __init__(
-        self,
-        *,
-        system_prompt: str,
-        memory: MemoryBackend | None = None,
-        provider: str | BaseProvider | None = None,
-        model: str | None = None,
-        tools: list[Callable[..., Any]] | None = None,
-        tool_calling: dict[str, Any] | None = None,
+    self,
+    *,
+    system_prompt: str,
+    memory: MemoryBackend | None = None,
+    provider: str | BaseProvider | None = None,
+    model: str | None = None,
+    tools: list[Callable[..., Any]] | None = None,
+    tool_calling: dict[str, Any] | None = None,
+    fallback_providers: list[str | BaseProvider] | None = None, 
+    max_retries: int = 1,                                         
     ) -> None:
         settings = get_settings()
 
@@ -71,6 +73,9 @@ class Agent:
 
         for func in tools or []:
             self.add_tool(func)
+            self.max_retries = max_retries
+            self._fallback_provider_configs = fallback_providers or []
+            self._fallback_providers: list[BaseProvider] = []
 
     def add_tool(self, func: Callable[..., Any]) -> None:
         """Register a callable tool on the agent."""
