@@ -6,7 +6,7 @@ import json
 import types
 from dataclasses import dataclass
 from typing import Any, get_args, get_origin
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from agentapi.errors import AgentProviderError
 
 @dataclass
@@ -176,13 +176,34 @@ def to_tool_definition(func: Callable[..., Any]) -> ToolDefinition:
     )
 
 
-def parse_tool_args(args_json: str) -> dict[str, Any]:
+def parse_tool_args(args_json: Any) -> dict[str, Any]:
     """Parse model tool arguments safely."""
+    if args_json is None:
+        return {}
+    if isinstance(args_json, Mapping):
+        parsed_mapping = dict(args_json)
+        if any(not isinstance(key, str) for key in parsed_mapping):
+            raise AgentProviderError(
+                "Tool argument mapping keys must be strings",
+                status_code=422,
+            )
+        return parsed_mapping
+    if not isinstance(args_json, str):
+        raise AgentProviderError(
+            f"Tool arguments must be a JSON object string or mapping, got {type(args_json).__name__}",
+            status_code=422,
+        )
     if not args_json.strip():
         return {}
     try:
-        return json.loads(args_json)
+        parsed = json.loads(args_json)
     except json.JSONDecodeError as exc:
         raise AgentProviderError(
             f"Failed to parse tool arguments as JSON: {exc}. Raw input: {args_json[:200]!r}"
         ) from exc
+    if not isinstance(parsed, dict):
+        raise AgentProviderError(
+            f"Tool arguments must decode to a JSON object, got {type(parsed).__name__}",
+            status_code=422,
+        )
+    return parsed
