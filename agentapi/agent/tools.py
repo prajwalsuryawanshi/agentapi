@@ -88,6 +88,8 @@ def _build_openai_tool_schema(
     properties: dict[str, Any] = {}
     required: list[str] = []
 
+    tool_name = (name or func.__name__).strip()
+
     for param_name, param in signature.parameters.items():
         annotation = param.annotation
         if annotation is inspect._empty:
@@ -108,7 +110,7 @@ def _build_openai_tool_schema(
     return {
         "type": "function",
         "function": {
-            "name": (name or func.__name__).strip(),
+            "name": tool_name,
             "description": _compose_tool_description(func, description=description, context=context),
             "strict": True,
             "parameters": {
