@@ -7,7 +7,7 @@
 [![Status](https://img.shields.io/badge/status-MVP-success.svg)](#project-status)
 [![Docs](https://img.shields.io/badge/docs-site-blue)](https://agentapi.prajwalsuryawanshi.in)
 
-AgentAPI is a lightweight Python framework for building agent backends with FastAPI-style ergonomics: provider abstraction, tool calling, conversation memory, and streaming-first APIs.
+AgentAPI is a lightweight Python framework for building agent backends with FastAPI-style ergonomics: provider abstraction, tool calling, conversation memory and streaming-first APIs.
 
 It targets teams who want minimal setup for agentic workflows while keeping the system flexible for production (Redis memory, custom providers, tool schemas).
 
